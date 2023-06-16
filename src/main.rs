@@ -1,6 +1,8 @@
 use anyhow::anyhow;
+use bytes::Bytes;
 use clap::Parser;
 use itertools::Itertools;
+use soloud::{AudioExt, LoadExt};
 use std::fmt::Write;
 
 use conlang::phone;
@@ -43,6 +45,8 @@ struct GenerateSyllablesCmd {
     pub consonants: Option<std::vec::Vec<phone::Consonant>>,
     #[arg(long, value_parser = parse_all::<phone::Vowel>)]
     pub vowels: Option<std::vec::Vec<phone::Vowel>>,
+    #[arg(long)]
+    pub speak: bool,
 }
 
 fn generate_all_syllables<'a>(
@@ -69,7 +73,53 @@ fn generate_all_syllables<'a>(
     vs.chain(vvs).chain(cvs)
 }
 
-fn main() {
+struct SpeakerBox {
+    polly: aws_sdk_polly::Client,
+    speaker: soloud::Soloud,
+}
+
+impl SpeakerBox {
+    pub async fn new() -> Result<Self, anyhow::Error> {
+        let aws_conf = aws_config::from_env().load().await;
+        let polly = aws_sdk_polly::Client::new(&aws_conf);
+        let speaker = soloud::Soloud::default()?;
+        Ok(Self { polly, speaker })
+    }
+
+    pub async fn speak(&self, ipa: &str) -> Result<(), anyhow::Error> {
+        let ogg = self.text_to_speech(ipa).await?;
+        self.play_audio(&ogg).await?;
+        Ok(())
+    }
+
+    async fn text_to_speech(&self, src: &str) -> Result<Bytes, anyhow::Error> {
+        let resp = self
+            .polly
+            .synthesize_speech()
+            .output_format(aws_sdk_polly::types::OutputFormat::OggVorbis)
+            .text_type(aws_sdk_polly::types::TextType::Ssml)
+            .text(format!(r#"<phoneme alphabet="ipa" ph="{src}"></phoneme>"#))
+            .voice_id(aws_sdk_polly::types::VoiceId::Joanna)
+            .engine(aws_sdk_polly::types::Engine::Neural)
+            .send()
+            .await?;
+        let blob = resp.audio_stream.collect().await?;
+        Ok(blob.into_bytes())
+    }
+
+    async fn play_audio(&self, src: &[u8]) -> Result<(), anyhow::Error> {
+        let mut wav = soloud::audio::Wav::default();
+        wav.load_mem(src)?;
+        self.speaker.play(&wav);
+        while self.speaker.voice_count() > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await
+        }
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
     let cmd = Command::parse();
     match cmd {
         Command::GenerateSyllables(cmd) => {
@@ -83,8 +133,18 @@ fn main() {
                     .map(|x| &x[..])
                     .unwrap_or(phone::Vowel::all()),
             );
+
+            let speaker = if cmd.speak {
+                Some(SpeakerBox::new().await.unwrap())
+            } else {
+                None
+            };
+
             for syl in generate_all_syllables(&inventory) {
                 println!("{}", syl);
+                if let Some(speaker) = speaker.as_ref() {
+                    speaker.speak(&syl).await.unwrap();
+                }
             }
         }
     }
