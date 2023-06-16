@@ -1,0 +1,20 @@
+[package]
+name = "conlang"
+version = "0.1.0"
+edition = "2021"
+authors = ["Travis Gockel <travis@gockelhut.com>"]
+license = "Apache-2.0"
+keywords = ["conlang"]
+categories = ["command-line-utilities", "text-processing"]
+description = "Construct languages from phonetics, to orthography, to grammar, to lexicon, to completion."
+
+[dependencies]
+anyhow = "^1.0.71"
+clap = { version = "^4.3.1", features = ["derive"] }
+itertools = "^0.10.5"
+rand = "^0.8.5"
+
+[lib]
+
+[[bin]]
+name = "conlang"
