@@ -51,15 +51,18 @@ struct GenerateSyllablesCmd {
 
 fn generate_all_syllables<'a>(
     inventory: &'a phone::Inventory,
-) -> impl Iterator<Item = String> + 'a {
-    let vs = inventory.vowels().iter().map(|x| format!("{}", x));
+) -> impl Iterator<Item = phone::Syllable> + 'a {
+    let vs = inventory
+        .vowels()
+        .iter()
+        .map(|x| phone::Syllable::new(&[(*x).into()]));
     let vvs = inventory
         .vowels()
         .iter()
         .cartesian_product(inventory.vowels().iter())
         .filter_map(|(v1, v2)| {
-            if v1 != v2 {
-                Some(format!("{}{}", v1, v2))
+            if *v1 != *v2 {
+                Some(phone::Syllable::new(&[(*v1).into(), (*v2).into()]))
             } else {
                 None
             }
@@ -68,7 +71,7 @@ fn generate_all_syllables<'a>(
         .consonants()
         .iter()
         .cartesian_product(inventory.vowels().iter())
-        .map(|(v1, v2)| format!("{}{}", v1, v2));
+        .map(|(v1, v2)| phone::Syllable::new(&[(*v1).into(), (*v2).into()]));
 
     vs.chain(vvs).chain(cvs)
 }
@@ -143,7 +146,8 @@ async fn main() {
             for syl in generate_all_syllables(&inventory) {
                 println!("{}", syl);
                 if let Some(speaker) = speaker.as_ref() {
-                    speaker.speak(&syl).await.unwrap();
+                    let ipa = format!("{syl}");
+                    speaker.speak(&ipa).await.unwrap();
                 }
             }
         }
