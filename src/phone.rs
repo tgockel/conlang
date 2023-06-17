@@ -235,6 +235,134 @@ impl Consonant {
     pub fn all() -> &'static [Self] {
         &ALL_CONSONANTS
     }
+
+    pub fn manner(&self) -> Manner {
+        match self {
+            Self::P => Manner::Plosive,
+            Self::B => Manner::Plosive,
+            Self::T => Manner::Plosive,
+            Self::D => Manner::Plosive,
+            Self::TRetroflex => Manner::Plosive,
+            Self::DRetroflex => Manner::Plosive,
+            Self::C => Manner::Plosive,
+            Self::JPalatal => Manner::Plosive,
+            Self::K => Manner::Plosive,
+            Self::G => Manner::Plosive,
+            Self::Q => Manner::Plosive,
+            Self::GCap => Manner::Plosive,
+            Self::GlottalStop => Manner::Plosive,
+            Self::M => Manner::Nasal,
+            Self::MHook => Manner::Nasal,
+            Self::N => Manner::Nasal,
+            Self::NRetroflex => Manner::Nasal,
+            Self::NPalatal => Manner::Nasal,
+            Self::NVelar => Manner::Nasal,
+            Self::NUvular => Manner::Nasal,
+            Self::BCap => Manner::Trill,
+            Self::Rrr => Manner::Trill,
+            Self::RCap => Manner::Trill,
+            Self::VTap => Manner::Tap,
+            Self::RTap => Manner::Tap,
+            Self::RFlap => Manner::Tap,
+            Self::Phi => Manner::Fricative,
+            Self::Beta => Manner::Fricative,
+            Self::F => Manner::Fricative,
+            Self::V => Manner::Fricative,
+            Self::Theta => Manner::Fricative,
+            Self::Del => Manner::Fricative,
+            Self::S => Manner::Fricative,
+            Self::Z => Manner::Fricative,
+            Self::Esh => Manner::Fricative,
+            Self::Ezh => Manner::Fricative,
+            Self::Sh => Manner::Fricative,
+            Self::Zh => Manner::Fricative,
+            Self::Ch => Manner::Fricative,
+            Self::JCurl => Manner::Fricative,
+            Self::X => Manner::Fricative,
+            Self::Gamma => Manner::Fricative,
+            Self::Xh => Manner::Fricative,
+            Self::Yr => Manner::Fricative,
+            Self::HBar => Manner::Fricative,
+            Self::Crook => Manner::Fricative,
+            Self::H => Manner::Fricative,
+            Self::HCurl => Manner::Fricative,
+            Self::LBelt => Manner::LateralFricative,
+            Self::Lezh => Manner::LateralFricative,
+            Self::VHook => Manner::Approximant,
+            Self::RTilt => Manner::Approximant,
+            Self::RTiltHook => Manner::Approximant,
+            Self::J => Manner::Approximant,
+            Self::MTiltTail => Manner::Approximant,
+            Self::L => Manner::LateralApproximant,
+            Self::Ll => Manner::LateralApproximant,
+            Self::Lambda => Manner::LateralApproximant,
+            Self::LCap => Manner::LateralApproximant,
+        }
+    }
+
+    pub fn place(&self) -> Place {
+        match self {
+            Self::P => Place::Bilabial,
+            Self::B => Place::Bilabial,
+            Self::T => Place::Alveolar,
+            Self::D => Place::Alveolar,
+            Self::TRetroflex => Place::Retroflex,
+            Self::DRetroflex => Place::Retroflex,
+            Self::C => Place::Palatal,
+            Self::JPalatal => Place::Palatal,
+            Self::K => Place::Velar,
+            Self::G => Place::Velar,
+            Self::Q => Place::Uvular,
+            Self::GCap => Place::Uvular,
+            Self::GlottalStop => Place::Glottal,
+            Self::M => Place::Bilabial,
+            Self::MHook => Place::Labiodental,
+            Self::N => Place::Alveolar,
+            Self::NRetroflex => Place::Retroflex,
+            Self::NPalatal => Place::Palatal,
+            Self::NVelar => Place::Velar,
+            Self::NUvular => Place::Uvular,
+            Self::BCap => Place::Bilabial,
+            Self::Rrr => Place::Alveolar,
+            Self::RCap => Place::Uvular,
+            Self::VTap => Place::Labiodental,
+            Self::RTap => Place::Alveolar,
+            Self::RFlap => Place::Retroflex,
+            Self::Phi => Place::Bilabial,
+            Self::Beta => Place::Bilabial,
+            Self::F => Place::Labiodental,
+            Self::V => Place::Labiodental,
+            Self::Theta => Place::Dental,
+            Self::Del => Place::Dental,
+            Self::S => Place::Alveolar,
+            Self::Z => Place::Alveolar,
+            Self::Esh => Place::PostAlveolar,
+            Self::Ezh => Place::PostAlveolar,
+            Self::Sh => Place::Retroflex,
+            Self::Zh => Place::Retroflex,
+            Self::Ch => Place::Palatal,
+            Self::JCurl => Place::Palatal,
+            Self::X => Place::Velar,
+            Self::Gamma => Place::Velar,
+            Self::Xh => Place::Uvular,
+            Self::Yr => Place::Uvular,
+            Self::HBar => Place::Pharyngeal,
+            Self::Crook => Place::Pharyngeal,
+            Self::H => Place::Glottal,
+            Self::HCurl => Place::Glottal,
+            Self::LBelt => Place::Alveolar,
+            Self::Lezh => Place::Alveolar,
+            Self::VHook => Place::Labiodental,
+            Self::RTilt => Place::Alveolar,
+            Self::RTiltHook => Place::Retroflex,
+            Self::J => Place::Palatal,
+            Self::MTiltTail => Place::Velar,
+            Self::L => Place::Alveolar,
+            Self::Ll => Place::Retroflex,
+            Self::Lambda => Place::Palatal,
+            Self::LCap => Place::Velar,
+        }
+    }
 }
 
 impl TryFrom<char> for Consonant {
@@ -328,6 +456,40 @@ impl fmt::Debug for Consonant {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_char(self.code())
     }
+}
+
+/// The [place of articulation](https://en.wikipedia.org/wiki/Place_of_articulation) is the location on the vocal tract
+/// where the sound production occurs. More simply, this is a place in the mouth. A bilabial sound like "p" comes from
+/// the lips, while a glottal sound like "h" comes from the throat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Place {
+    Bilabial,
+    Labiodental,
+    Dental,
+    Alveolar,
+    PostAlveolar,
+    Retroflex,
+    Palatal,
+    Velar,
+    Uvular,
+    Pharyngeal,
+    Glottal,
+}
+
+/// The [manner of articulation](https://en.wikipedia.org/wiki/Manner_of_articulation) is the interaction of the speech
+/// organs used to make the sound. A plosive like "t" is a full stop of air, a nasal sound like "n" is made by allowing
+/// air to escape through the nose, and a lateral approximate sound like "l" allows air to escape around the sides of
+/// the tongue (note that these are all alveolar in place, yet sound different).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Manner {
+    Plosive,
+    Nasal,
+    Trill,
+    Tap,
+    Fricative,
+    LateralFricative,
+    Approximant,
+    LateralApproximant,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -430,6 +592,74 @@ impl Vowel {
     pub fn all() -> &'static [Self] {
         &ALL_VOWELS
     }
+
+    pub fn height(&self) -> Height {
+        let value = match self {
+            Self::I => 10,
+            Self::Y => 10,
+            Self::IBar => 10,
+            Self::UBar => 10,
+            Self::Uu => 10,
+            Self::U => 10,
+            Self::Ii => 8,
+            Self::YCap => 8,
+            Self::OmegaFlip => 8,
+            Self::E => 7,
+            Self::OCross => 7,
+            Self::EReverse => 7,
+            Self::OBar => 7,
+            Self::RamsHorns => 7,
+            Self::O => 7,
+            Self::Schwa => 5,
+            Self::EOpen => 3,
+            Self::Oe => 3,
+            Self::Ze => 3,
+            Self::EpsilonClosedReversed => 3,
+            Self::VFlip => 3,
+            Self::OOpen => 3,
+            Self::Ae => 1,
+            Self::AFlip => 2,
+            Self::A => 0,
+            Self::OeSmall => 0,
+            Self::AScript => 0,
+            Self::AScriptFlip => 0,
+        };
+        Height::new(value)
+    }
+
+    pub fn frontness(&self) -> Frontness {
+        let value = match self {
+            Self::I => 10,
+            Self::Y => 10,
+            Self::IBar => 5,
+            Self::UBar => 5,
+            Self::Uu => 0,
+            Self::U => 0,
+            Self::Ii => 8,
+            Self::YCap => 8,
+            Self::OmegaFlip => 1,
+            Self::E => 9,
+            Self::OCross => 9,
+            Self::EReverse => 5,
+            Self::OBar => 5,
+            Self::RamsHorns => 0,
+            Self::O => 0,
+            Self::Schwa => 5,
+            Self::EOpen => 8,
+            Self::Oe => 8,
+            Self::Ze => 4,
+            Self::EpsilonClosedReversed => 4,
+            Self::VFlip => 0,
+            Self::OOpen => 0,
+            Self::Ae => 7,
+            Self::AFlip => 3,
+            Self::A => 6,
+            Self::OeSmall => 6,
+            Self::AScript => 0,
+            Self::AScriptFlip => 0,
+        };
+        Frontness::new(value)
+    }
 }
 
 impl fmt::Display for Vowel {
@@ -491,6 +721,62 @@ impl FromStr for Vowel {
             1 => Self::try_from(value.chars().nth(0).unwrap()),
             _ => Err(ParseError::TooManyCharacters),
         }
+    }
+}
+
+/// For a `Vowel`, how high the tongue is in the mouth. The value has a range 0 to 10, inclusive.
+///
+/// The International Phonetic Alphabet classifies vowel sounds into "Close," "Close-Mid," "Open-Mid," and "Open." An
+/// `enum` for this is not sufficient, since characters like "near-close near-front unrounded vowel" (ɪ) and "near-open
+/// central vowel" (ɐ) land in between these categories. Values of 0 represent fully-open vowels like a and ɒ; values of
+/// 10 represent the fully-closed vowels like i and ɯ; and other values somewhere in between.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Height {
+    value: u8,
+}
+
+impl Height {
+    pub fn new(value: u8) -> Self {
+        assert!(value <= 10);
+        Self { value }
+    }
+
+    pub fn value(&self) -> u8 {
+        self.value
+    }
+}
+
+impl fmt::Display for Height {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.value())
+    }
+}
+
+/// For a `Vowel`, how close the tongue is to the front of the mouth. The value has a range 0 to 10, inclusive.
+///
+/// The International Phonetic Alphabet has vowels on a slant, since higher vowels allow the tongue more maneuverability
+/// forward (presumably your teeth get in the way for open vowels). This does not correct for that; in other words, the
+/// trapezoid shape is not considered in frontness values. So the "open front unrounded vowel" (a) has a value of 6,
+/// despite being the most front an open vowel can be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Frontness {
+    value: u8,
+}
+
+impl Frontness {
+    pub fn new(value: u8) -> Self {
+        assert!(value <= 10);
+        Self { value }
+    }
+
+    pub fn value(&self) -> u8 {
+        self.value
+    }
+}
+
+impl fmt::Display for Frontness {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.value())
     }
 }
 
