@@ -45,6 +45,8 @@ struct GenerateSyllablesCmd {
     pub consonants: Option<std::vec::Vec<phone::Consonant>>,
     #[arg(long, value_parser = parse_all::<phone::Vowel>)]
     pub vowels: Option<std::vec::Vec<phone::Vowel>>,
+    #[arg(long, value_parser = parse_all::<phone::NonPulmonicConsonant>)]
+    pub non_pulmonic: Option<std::vec::Vec<phone::NonPulmonicConsonant>>,
     #[arg(long)]
     pub speak: bool,
 }
@@ -135,6 +137,7 @@ async fn main() {
                     .as_ref()
                     .map(|x| &x[..])
                     .unwrap_or(phone::Vowel::all()),
+                cmd.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
             );
 
             let speaker = if cmd.speak {

@@ -458,6 +458,98 @@ impl fmt::Debug for Consonant {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NonPulmonicConsonant {
+    BilabialClick,     // <K- ʘ
+    DentalClick,       // <K- ǀ
+    Postalveoalar,     // <K- ǃ
+    Palatoalveolar,    // <K- ǂ
+    AlveolarLateral,   // <K- ǁ
+    BilabialImplosive, // <K- ɓ
+    DentalImplosive,   // <K- ɗ
+    Palatal,           // <K- ʄ
+    Velar,             // <K- ɠ
+    Uvular,            // <K- ʛ
+}
+
+const ALL_NON_PULMONIC_CONSTANTS: [NonPulmonicConsonant; 10] = [
+    NonPulmonicConsonant::BilabialClick,
+    NonPulmonicConsonant::DentalClick,
+    NonPulmonicConsonant::Postalveoalar,
+    NonPulmonicConsonant::Palatoalveolar,
+    NonPulmonicConsonant::AlveolarLateral,
+    NonPulmonicConsonant::BilabialImplosive,
+    NonPulmonicConsonant::DentalImplosive,
+    NonPulmonicConsonant::Palatal,
+    NonPulmonicConsonant::Velar,
+    NonPulmonicConsonant::Uvular,
+];
+
+impl NonPulmonicConsonant {
+    pub fn code(&self) -> char {
+        match self {
+            Self::BilabialClick => 'ʘ',
+            Self::DentalClick => 'ǀ',
+            Self::Postalveoalar => 'ǃ',
+            Self::Palatoalveolar => 'ǂ',
+            Self::AlveolarLateral => 'ǁ',
+            Self::BilabialImplosive => 'ɓ',
+            Self::DentalImplosive => 'ɗ',
+            Self::Palatal => 'ʄ',
+            Self::Velar => 'ɠ',
+            Self::Uvular => 'ʛ',
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &ALL_NON_PULMONIC_CONSTANTS
+    }
+}
+
+impl TryFrom<char> for NonPulmonicConsonant {
+    type Error = ParseError;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        match value {
+            'ʘ' => Ok(Self::BilabialClick),
+            'ǀ' => Ok(Self::DentalClick),
+            'ǃ' => Ok(Self::Postalveoalar),
+            'ǂ' => Ok(Self::Palatoalveolar),
+            'ǁ' => Ok(Self::AlveolarLateral),
+            'ɓ' => Ok(Self::BilabialImplosive),
+            'ɗ' => Ok(Self::DentalImplosive),
+            'ʄ' => Ok(Self::Palatal),
+            'ɠ' => Ok(Self::Velar),
+            'ʛ' => Ok(Self::Uvular),
+            _ => Err(ParseError::UnknownCharacter(value)),
+        }
+    }
+}
+
+impl FromStr for NonPulmonicConsonant {
+    type Err = ParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.chars().count() {
+            0 => Err(ParseError::NoInput),
+            1 => Self::try_from(value.chars().nth(0).unwrap()),
+            _ => Err(ParseError::TooManyCharacters),
+        }
+    }
+}
+
+impl fmt::Display for NonPulmonicConsonant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_char(self.code())
+    }
+}
+
+impl fmt::Debug for NonPulmonicConsonant {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_char(self.code())
+    }
+}
+
 /// The [place of articulation](https://en.wikipedia.org/wiki/Place_of_articulation) is the location on the vocal tract
 /// where the sound production occurs. More simply, this is a place in the mouth. A bilabial sound like "p" comes from
 /// the lips, while a glottal sound like "h" comes from the throat.
@@ -785,6 +877,7 @@ impl fmt::Display for Frontness {
 pub enum Phoneme {
     Consonant(Consonant),
     Vowel(Vowel),
+    NonPulmonicConsonant(NonPulmonicConsonant),
 }
 
 impl From<Consonant> for Phoneme {
@@ -799,11 +892,18 @@ impl From<Vowel> for Phoneme {
     }
 }
 
+impl From<NonPulmonicConsonant> for Phoneme {
+    fn from(value: NonPulmonicConsonant) -> Self {
+        Self::NonPulmonicConsonant(value)
+    }
+}
+
 impl Phoneme {
     pub fn code(&self) -> char {
         match self {
             Self::Consonant(c) => c.code(),
             Self::Vowel(v) => v.code(),
+            Self::NonPulmonicConsonant(c) => c.code(),
         }
     }
 }
@@ -821,6 +921,7 @@ impl TryFrom<char> for Phoneme {
         Consonant::try_from(value)
             .map(Into::into)
             .or_else(|_| Vowel::try_from(value).map(Into::into))
+            .or_else(|_| NonPulmonicConsonant::try_from(value).map(Into::into))
     }
 }
 
@@ -830,6 +931,7 @@ enum SyllableInner {
     Local2([Phoneme; 2]),
     Local3([Phoneme; 3]),
     Local4([Phoneme; 4]),
+    Local5([Phoneme; 5]),
     Heap(Vec<Phoneme>),
 }
 
@@ -845,6 +947,7 @@ impl Syllable {
             2 => SyllableInner::Local2([seq[0], seq[1]]),
             3 => SyllableInner::Local3([seq[0], seq[1], seq[2]]),
             4 => SyllableInner::Local4([seq[0], seq[1], seq[2], seq[3]]),
+            5 => SyllableInner::Local5([seq[0], seq[1], seq[2], seq[3], seq[4]]),
             _ => SyllableInner::Heap(seq.into()),
         };
         Self { inner }
@@ -856,6 +959,7 @@ impl Syllable {
             SyllableInner::Local2(d) => d,
             SyllableInner::Local3(d) => d,
             SyllableInner::Local4(d) => d,
+            SyllableInner::Local5(d) => d,
             SyllableInner::Heap(d) => &d,
         }
     }
@@ -905,13 +1009,19 @@ impl FromStr for Syllable {
 pub struct Inventory {
     consonants: Vec<Consonant>,
     vowels: Vec<Vowel>,
+    non_pulmonic_consonants: Vec<NonPulmonicConsonant>,
 }
 
 impl Inventory {
-    pub fn new(consonants: impl Into<Vec<Consonant>>, vowels: impl Into<Vec<Vowel>>) -> Self {
+    pub fn new(
+        consonants: impl Into<Vec<Consonant>>,
+        vowels: impl Into<Vec<Vowel>>,
+        non_pulmonic_consonants: impl Into<Vec<NonPulmonicConsonant>>,
+    ) -> Self {
         Self {
             consonants: consonants.into(),
             vowels: vowels.into(),
+            non_pulmonic_consonants: non_pulmonic_consonants.into(),
         }
     }
 
@@ -921,6 +1031,10 @@ impl Inventory {
 
     pub fn vowels(&self) -> &[Vowel] {
         &self.vowels
+    }
+
+    pub fn non_pulmonic_consonants(&self) -> &[NonPulmonicConsonant] {
+        &self.non_pulmonic_consonants
     }
 }
 
@@ -955,6 +1069,15 @@ mod tests {
         for orig in Vowel::all() {
             let code = orig.code();
             let parsed = Vowel::from_str(&format!("{code}")).unwrap();
+            assert_eq!(*orig, parsed);
+        }
+    }
+
+    #[test]
+    fn non_pulmonics_parsing() {
+        for orig in NonPulmonicConsonant::all() {
+            let code = orig.code();
+            let parsed = NonPulmonicConsonant::from_str(&format!("{code}")).unwrap();
             assert_eq!(*orig, parsed);
         }
     }
