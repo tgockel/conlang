@@ -168,6 +168,10 @@ const ALL_CONSONANTS: [Consonant; 59] = [
 ];
 
 impl Consonant {
+    pub fn all() -> &'static [Self] {
+        &ALL_CONSONANTS
+    }
+
     pub fn code(&self) -> char {
         match self {
             Self::P => 'p',
@@ -230,10 +234,6 @@ impl Consonant {
             Self::Lambda => 'ʎ',
             Self::LCap => 'ʟ',
         }
-    }
-
-    pub fn all() -> &'static [Self] {
-        &ALL_CONSONANTS
     }
 
     pub fn manner(&self) -> Manner {
@@ -568,6 +568,14 @@ pub enum Place {
     Glottal,
 }
 
+impl TryFrom<char> for Place {
+    type Error = ParseError;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
 /// The [manner of articulation](https://en.wikipedia.org/wiki/Manner_of_articulation) is the interaction of the speech
 /// organs used to make the sound. A plosive like "t" is a full stop of air, a nasal sound like "n" is made by allowing
 /// air to escape through the nose, and a lateral approximate sound like "l" allows air to escape around the sides of
@@ -582,6 +590,14 @@ pub enum Manner {
     LateralFricative,
     Approximant,
     LateralApproximant,
+}
+
+impl TryFrom<char> for Manner {
+    type Error = ParseError;
+
+    fn try_from(value: char) -> Result<Self, Self::Error> {
+        todo!()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -926,42 +942,18 @@ impl TryFrom<char> for Phoneme {
 }
 
 #[derive(Clone)]
-enum SyllableInner {
-    Local1([Phoneme; 1]),
-    Local2([Phoneme; 2]),
-    Local3([Phoneme; 3]),
-    Local4([Phoneme; 4]),
-    Local5([Phoneme; 5]),
-    Heap(Vec<Phoneme>),
-}
-
-#[derive(Clone)]
 pub struct Syllable {
-    inner: SyllableInner,
+    inner: smallvec::SmallVec<[Phoneme; 8]>,
 }
 
 impl Syllable {
     pub fn new(seq: &[Phoneme]) -> Self {
-        let inner = match seq.len() {
-            1 => SyllableInner::Local1([seq[0]]),
-            2 => SyllableInner::Local2([seq[0], seq[1]]),
-            3 => SyllableInner::Local3([seq[0], seq[1], seq[2]]),
-            4 => SyllableInner::Local4([seq[0], seq[1], seq[2], seq[3]]),
-            5 => SyllableInner::Local5([seq[0], seq[1], seq[2], seq[3], seq[4]]),
-            _ => SyllableInner::Heap(seq.into()),
-        };
+        let inner = smallvec::SmallVec::from(seq);
         Self { inner }
     }
 
     pub fn parts(&self) -> &[Phoneme] {
-        match &self.inner {
-            SyllableInner::Local1(d) => d,
-            SyllableInner::Local2(d) => d,
-            SyllableInner::Local3(d) => d,
-            SyllableInner::Local4(d) => d,
-            SyllableInner::Local5(d) => d,
-            SyllableInner::Heap(d) => &d,
-        }
+        self.inner.as_slice()
     }
 }
 

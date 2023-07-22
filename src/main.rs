@@ -5,7 +5,7 @@ use itertools::Itertools;
 use soloud::{AudioExt, LoadExt};
 use std::fmt::Write;
 
-use conlang::phone;
+use conlang::{gen, phone};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -43,10 +43,16 @@ where
 struct GenerateSyllablesCmd {
     #[arg(long, value_parser = parse_all::<phone::Consonant>)]
     pub consonants: Option<std::vec::Vec<phone::Consonant>>,
+
     #[arg(long, value_parser = parse_all::<phone::Vowel>)]
     pub vowels: Option<std::vec::Vec<phone::Vowel>>,
+
     #[arg(long, value_parser = parse_all::<phone::NonPulmonicConsonant>)]
     pub non_pulmonic: Option<std::vec::Vec<phone::NonPulmonicConsonant>>,
+
+    #[arg(long)]
+    pub pattern: Vec<String>,
+
     #[arg(long)]
     pub speak: bool,
 }
@@ -146,10 +152,30 @@ async fn main() {
                 None
             };
 
-            for syl in generate_all_syllables(&inventory) {
-                println!("{}", syl);
+            let patterns: Result<Vec<_>, _> = cmd
+                .pattern
+                .iter()
+                .map(|p| {
+                    gen::WordGenerator::parse(&p, &inventory)
+                        .map_err(|e| format!("Could not parse pattern \"{p}\": {e}"))
+                })
+                .collect();
+            let patterns = match patterns {
+                Ok(ps) => ps,
+                Err(e) => panic!("{e}"),
+            };
+
+            let mut rng = rand::thread_rng();
+            use rand::Rng;
+            for idx in rand::thread_rng()
+                .sample_iter(rand::distributions::Uniform::new(0, patterns.len()))
+                .take(100)
+            {
+                let pattern = &patterns[idx];
+                let word = pattern.generate(&mut rng);
+                let ipa = word.iter().join(" ");
+                println!("{}", ipa);
                 if let Some(speaker) = speaker.as_ref() {
-                    let ipa = format!("{syl}");
                     speaker.speak(&ipa).await.unwrap();
                 }
             }
