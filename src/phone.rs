@@ -6,6 +6,7 @@
 use std::{
     error::Error,
     fmt::{self, Write},
+    num::NonZeroU8,
     str::FromStr,
 };
 
@@ -703,12 +704,12 @@ impl Vowel {
 
     pub fn height(&self) -> Height {
         let value = match self {
-            Self::I => 10,
-            Self::Y => 10,
-            Self::IBar => 10,
-            Self::UBar => 10,
-            Self::Uu => 10,
-            Self::U => 10,
+            Self::I => 9,
+            Self::Y => 9,
+            Self::IBar => 9,
+            Self::UBar => 9,
+            Self::Uu => 9,
+            Self::U => 9,
             Self::Ii => 8,
             Self::YCap => 8,
             Self::OmegaFlip => 8,
@@ -725,24 +726,24 @@ impl Vowel {
             Self::EpsilonClosedReversed => 3,
             Self::VFlip => 3,
             Self::OOpen => 3,
-            Self::Ae => 1,
+            Self::Ae => 2,
             Self::AFlip => 2,
-            Self::A => 0,
-            Self::OeSmall => 0,
-            Self::AScript => 0,
-            Self::AScriptFlip => 0,
+            Self::A => 1,
+            Self::OeSmall => 1,
+            Self::AScript => 1,
+            Self::AScriptFlip => 1,
         };
         Height::new(value)
     }
 
     pub fn frontness(&self) -> Frontness {
         let value = match self {
-            Self::I => 10,
-            Self::Y => 10,
+            Self::I => 9,
+            Self::Y => 9,
             Self::IBar => 5,
             Self::UBar => 5,
-            Self::Uu => 0,
-            Self::U => 0,
+            Self::Uu => 1,
+            Self::U => 1,
             Self::Ii => 8,
             Self::YCap => 8,
             Self::OmegaFlip => 1,
@@ -750,21 +751,21 @@ impl Vowel {
             Self::OCross => 9,
             Self::EReverse => 5,
             Self::OBar => 5,
-            Self::RamsHorns => 0,
-            Self::O => 0,
+            Self::RamsHorns => 1,
+            Self::O => 1,
             Self::Schwa => 5,
             Self::EOpen => 8,
             Self::Oe => 8,
             Self::Ze => 4,
             Self::EpsilonClosedReversed => 4,
-            Self::VFlip => 0,
-            Self::OOpen => 0,
+            Self::VFlip => 1,
+            Self::OOpen => 1,
             Self::Ae => 7,
             Self::AFlip => 3,
             Self::A => 6,
             Self::OeSmall => 6,
-            Self::AScript => 0,
-            Self::AScriptFlip => 0,
+            Self::AScript => 1,
+            Self::AScriptFlip => 1,
         };
         Frontness::new(value)
     }
@@ -839,18 +840,21 @@ impl FromStr for Vowel {
 /// central vowel" (ɐ) land in between these categories. Values of 0 represent fully-open vowels like a and ɒ; values of
 /// 10 represent the fully-closed vowels like i and ɯ; and other values somewhere in between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct Height {
-    value: u8,
+    value: NonZeroU8,
 }
 
 impl Height {
     pub fn new(value: u8) -> Self {
-        assert!(value <= 10);
+        assert!(value > 0);
+        assert!(value <= 9);
+        let value = unsafe { NonZeroU8::new_unchecked(value) };
         Self { value }
     }
 
     pub fn value(&self) -> u8 {
-        self.value
+        self.value.get()
     }
 }
 
@@ -867,18 +871,21 @@ impl fmt::Display for Height {
 /// trapezoid shape is not considered in frontness values. So the "open front unrounded vowel" (a) has a value of 6,
 /// despite being the most front an open vowel can be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct Frontness {
-    value: u8,
+    value: NonZeroU8,
 }
 
 impl Frontness {
     pub fn new(value: u8) -> Self {
-        assert!(value <= 10);
+        assert!(value > 0);
+        assert!(value <= 9);
+        let value = unsafe { NonZeroU8::new_unchecked(value) };
         Self { value }
     }
 
     pub fn value(&self) -> u8 {
-        self.value
+        self.value.get()
     }
 }
 
@@ -1015,6 +1022,10 @@ impl Inventory {
             vowels: vowels.into(),
             non_pulmonic_consonants: non_pulmonic_consonants.into(),
         }
+    }
+
+    pub fn with_everything() -> Self {
+        Self::new(Consonant::all(), Vowel::all(), NonPulmonicConsonant::all())
     }
 
     pub fn consonants(&self) -> &[Consonant] {

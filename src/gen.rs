@@ -198,12 +198,14 @@ impl fmt::Debug for PhonemeGenerator {
 #[cfg(test)]
 mod gen_tests {
     use super::*;
+    use crate::phone;
 
     #[test]
     fn parsing() {
+        let inventory = phone::Inventory::with_everything();
         let inputs = &["C", "V", "CV", "VVC"];
         for input in inputs.iter() {
-            WordGenerator::from_str(input).unwrap();
+            WordGenerator::parse(input, &inventory).unwrap();
         }
     }
 }
