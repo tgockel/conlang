@@ -1,7 +1,7 @@
 use crate::phone;
 use rand::Rng;
 use smallvec::SmallVec;
-use std::{fmt, str::FromStr};
+use std::fmt;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

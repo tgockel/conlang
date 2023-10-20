@@ -833,12 +833,12 @@ impl FromStr for Vowel {
     }
 }
 
-/// For a `Vowel`, how high the tongue is in the mouth. The value has a range 0 to 10, inclusive.
+/// For a `Vowel`, how high the tongue is in the mouth. The value has a range 1 to 9, inclusive.
 ///
 /// The International Phonetic Alphabet classifies vowel sounds into "Close," "Close-Mid," "Open-Mid," and "Open." An
 /// `enum` for this is not sufficient, since characters like "near-close near-front unrounded vowel" (ɪ) and "near-open
-/// central vowel" (ɐ) land in between these categories. Values of 0 represent fully-open vowels like a and ɒ; values of
-/// 10 represent the fully-closed vowels like i and ɯ; and other values somewhere in between.
+/// central vowel" (ɐ) land in between these categories. Values of 1 represent fully-open vowels like a and ɒ; values of
+/// 9 represent the fully-closed vowels like i and ɯ; and other values somewhere in between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct Height {
