@@ -1,3 +1,7 @@
+//! # Gen
+//!
+//! This module concerns generation of words from rule sets.
+
 use crate::phone;
 use rand::Rng;
 use smallvec::SmallVec;

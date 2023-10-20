@@ -59,33 +59,6 @@ struct GenerateSyllablesCmd {
     pub speak: bool,
 }
 
-fn generate_all_syllables<'a>(
-    inventory: &'a phone::Inventory,
-) -> impl Iterator<Item = phone::Syllable> + 'a {
-    let vs = inventory
-        .vowels()
-        .iter()
-        .map(|x| phone::Syllable::new(&[(*x).into()]));
-    let vvs = inventory
-        .vowels()
-        .iter()
-        .cartesian_product(inventory.vowels().iter())
-        .filter_map(|(v1, v2)| {
-            if *v1 != *v2 {
-                Some(phone::Syllable::new(&[(*v1).into(), (*v2).into()]))
-            } else {
-                None
-            }
-        });
-    let cvs = inventory
-        .consonants()
-        .iter()
-        .cartesian_product(inventory.vowels().iter())
-        .map(|(v1, v2)| phone::Syllable::new(&[(*v1).into(), (*v2).into()]));
-
-    vs.chain(vvs).chain(cvs)
-}
-
 struct SpeakerBox {
     polly: aws_sdk_polly::Client,
     speaker: soloud::Soloud,
@@ -158,7 +131,7 @@ async fn main() {
                 .pattern
                 .iter()
                 .map(|p| {
-                    gen::WordGenerator::parse(&p, &inventory)
+                    gen::WordGenerator::parse(p, &inventory)
                         .map_err(|e| format!("Could not parse pattern \"{p}\": {e}"))
                 })
                 .collect();
