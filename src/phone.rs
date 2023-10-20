@@ -3,6 +3,7 @@
 //! Phonetics form the basis of spoken language. This module contains `Phoneme`s as the basic building block of the
 //! language and `Syllable`s to tie them together.
 
+use smallvec::{SmallVec, smallvec};
 use std::{
     error::Error,
     fmt::{self, Write},
@@ -569,11 +570,19 @@ pub enum Place {
     Glottal,
 }
 
-impl TryFrom<char> for Place {
-    type Error = ParseError;
-
-    fn try_from(value: char) -> Result<Self, Self::Error> {
-        todo!()
+impl Place {
+    pub fn try_from(value: char) -> Result<SmallVec<[Self; 4]>, ParseError> {
+        match value {
+            'M' => Ok(smallvec![Self::Bilabial]),
+            'L' => Ok(smallvec![Self::Labiodental]),
+            'D' => Ok(smallvec![Self::Dental, Self::Alveolar, Self::PostAlveolar]),
+            'Ḍ' => Ok(smallvec![Self::Retroflex]),
+            'J' => Ok(smallvec![Self::Palatal]),
+            'G' => Ok(smallvec![Self::Velar]),
+            'Q' => Ok(smallvec![Self::Uvular]),
+            'H' => Ok(smallvec![Self::Pharyngeal, Self::Glottal]),
+            _ => Err(ParseError::UnknownCharacter(value)),
+        }
     }
 }
 
@@ -593,11 +602,16 @@ pub enum Manner {
     LateralApproximant,
 }
 
-impl TryFrom<char> for Manner {
-    type Error = ParseError;
-
-    fn try_from(value: char) -> Result<Self, Self::Error> {
-        todo!()
+impl Manner {
+    pub fn try_from(value: char) -> Result<SmallVec<[Self; 2]>, ParseError> {
+        match value {
+            'P' => Ok(smallvec![Self::Plosive]),
+            'N' => Ok(smallvec![Self::Nasal]),
+            'T' => Ok(smallvec![Self::Trill]),
+            'X' => Ok(smallvec![Self::Fricative, Self::LateralFricative]),
+            'R' => Ok(smallvec![Self::Approximant, Self::LateralApproximant]),
+            _ => Err(ParseError::UnknownCharacter(value)),
+        }
     }
 }
 

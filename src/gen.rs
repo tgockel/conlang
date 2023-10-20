@@ -125,17 +125,17 @@ impl PhonemeGenerator {
             '[' => todo!(),
             '(' => todo!(),
             _ => {
-                if let Ok(place) = phone::Place::try_from(first) {
+                if let Ok(places) = phone::Place::try_from(first) {
                     Ok(Self::from_character_class_filtered(
                         src,
                         inventory.consonants(),
-                        |x| x.place() == place,
+                        |x| places.contains(&x.place()),
                     ))
-                } else if let Ok(manner) = phone::Manner::try_from(first) {
+                } else if let Ok(manners) = phone::Manner::try_from(first) {
                     Ok(Self::from_character_class_filtered(
                         src,
                         inventory.consonants(),
-                        |x| x.manner() == manner,
+                        |x| manners.contains(&x.manner()),
                     ))
                 } else {
                     todo!()

@@ -50,9 +50,11 @@ struct GenerateSyllablesCmd {
     #[arg(long, value_parser = parse_all::<phone::NonPulmonicConsonant>)]
     pub non_pulmonic: Option<std::vec::Vec<phone::NonPulmonicConsonant>>,
 
-    #[arg(long)]
+    /// A phonotological constraint pattern like `CVC` or `VV`. Specify more than once for multiple patterns.
+    #[arg(long, required(true))]
     pub pattern: Vec<String>,
 
+    /// Speak the generated phrases.
     #[arg(long)]
     pub speak: bool,
 }
