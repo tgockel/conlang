@@ -1,0 +1,20 @@
+th.vlabel
+{
+  vertical-align: bottom;
+  text-align: center;
+}
+
+th.vlabel span
+{
+  -ms-writing-mode: tb-rl;
+  -webkit-writing-mode: vertical-rl;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+}
+
+table.compressed td
+{
+  padding: 1px;
+  text-align: center;
+}

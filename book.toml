@@ -1,0 +1,12 @@
+[book]
+authors = ["Travis Gockel"]
+language = "en"
+multilingual = false
+src = "doc"
+
+[build]
+build-dir = "target/doc"
+
+[output.html]
+additional-css = ["doc/custom.css"]
+mathjax-support = true
