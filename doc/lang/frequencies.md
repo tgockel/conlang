@@ -61,6 +61,8 @@ The distribution \\( f \\) can be customized over its \\( a \\) parameter:
 ```
 
 This can even out the extremes of the later-appearing values by giving them a bit of extra weight.
+In the table below, you can see the effect setting the value of \\( a \\) (seen in the header) has on the probability
+distribution of the inventory.
 
 | a → |  0.0  |  0.1  |  0.2  |  0.5  |  1.0  |  2.0 | 10.0 |
 | ---:| -----:| -----:| -----:| -----:| -----:| ----:| ----:|
@@ -78,9 +80,12 @@ This can even out the extremes of the later-appearing values by giving them a bi
 | `t` |  0.9% |  1.9% |  2.6% |  4.1% |  5.4% | 6.5% | 7.9% |
 
 In my experience, setting \\( a \\) to anything above \\( 0.2 \\) leads to fairly monotonous languages.
-Natural languages have these rarely-used sounds in them.
+There is not a lot of character in the difference between a sound appearing 8.6% of the time versus 7.9%.
+Natural languages frequently have rarely-used productions in them.
 
 ### Custom
+
+For tighter control of generation, you can specify each element with a custom weight.
 
 ```json
 {
@@ -93,6 +98,18 @@ Natural languages have these rarely-used sounds in them.
   ]
 }
 ```
+
+For each element \\( x \\), the probability is that element's weight divided by the total of all weights:
+
+\\[
+  f(x) = \frac{weight(x)}{\sum_{i \in C} weight(i)}
+\\]
+
+The JSON specification from above gives the probabilities:
+
+|  `ɴ`  |  `f`  |  `ʝ`  |  `θ`  |  `b`  |
+|:-----:|:-----:|:-----:|:-----:|:-----:|
+| 42.9% | 28.6% | 14.3% |  7.1% |  7.1% |
 
 ## Rule Interference
 

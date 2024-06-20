@@ -201,7 +201,7 @@ These letters do not come from any official phonetic studies, but serve as conve
 |               |           |         | `ə`     |       |         |
 | Open-mid      | `ɛ` `œ`   |         | `ɜ` `ɞ` |       | `ʌ` `ɔ` |
 |               | `æ`       |         | `ɐ`     |       |         |
-| Open          |           | `a` `ɶ` |         |       | `ɑ`     |
+| Open          |           | `a` `ɶ` |         |       | `ɑ` `ɒ` |
 
 ### Non-pulmonic Consonants
 
