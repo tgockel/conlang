@@ -5,7 +5,7 @@ use itertools::Itertools;
 use soloud::{AudioExt, LoadExt};
 use std::fmt::Write;
 
-use conlang::{gen, phone};
+use conlang::{generate, phone};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -131,7 +131,7 @@ async fn main() {
                 .pattern
                 .iter()
                 .map(|p| {
-                    gen::WordGenerator::parse(p, &inventory)
+                    generate::WordGenerator::parse(p, &inventory)
                         .map_err(|e| format!("Could not parse pattern \"{p}\": {e}"))
                 })
                 .collect();

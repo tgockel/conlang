@@ -1,4 +1,4 @@
-//! # Gen
+//! # Generate
 //!
 //! This module concerns generation of words from rule sets.
 
