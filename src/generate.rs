@@ -120,7 +120,7 @@ impl PhonemeGenerator {
         inventory: &phone::Inventory,
     ) -> Result<(Self, &'a str), ParseError> {
         let Some(first) = src.chars().nth(0) else {
-            return Err(ParseError::NoInput)
+            return Err(ParseError::NoInput);
         };
 
         match first {

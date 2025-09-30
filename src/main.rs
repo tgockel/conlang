@@ -1,13 +1,14 @@
 use anyhow::anyhow;
-#[cfg(feature = "pronounce")]
-use bytes::Bytes;
 use clap::Parser;
 use itertools::Itertools;
-#[cfg(feature = "pronounce")]
-use soloud::{AudioExt, LoadExt};
 use std::fmt::Write;
 
 use conlang::{generate, phone};
+
+#[cfg(feature = "pronounce")]
+mod speak;
+#[cfg(feature = "pronounce")]
+use speak::SpeakerBox;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -61,53 +62,6 @@ struct GenerateSyllablesCmd {
     pub speak: bool,
 }
 
-#[cfg(feature = "pronounce")]
-struct SpeakerBox {
-    polly: aws_sdk_polly::Client,
-    speaker: soloud::Soloud,
-}
-
-#[cfg(feature = "pronounce")]
-impl SpeakerBox {
-    pub async fn new() -> Result<Self, anyhow::Error> {
-        let aws_conf = aws_config::from_env().load().await;
-        let polly = aws_sdk_polly::Client::new(&aws_conf);
-        let speaker = soloud::Soloud::default()?;
-        Ok(Self { polly, speaker })
-    }
-
-    pub async fn speak(&self, ipa: &str) -> Result<(), anyhow::Error> {
-        let ogg = self.text_to_speech(ipa).await?;
-        self.play_audio(&ogg).await?;
-        Ok(())
-    }
-
-    async fn text_to_speech(&self, src: &str) -> Result<Bytes, anyhow::Error> {
-        let resp = self
-            .polly
-            .synthesize_speech()
-            .output_format(aws_sdk_polly::types::OutputFormat::OggVorbis)
-            .text_type(aws_sdk_polly::types::TextType::Ssml)
-            .text(format!(r#"<phoneme alphabet="ipa" ph="{src}"></phoneme>"#))
-            .voice_id(aws_sdk_polly::types::VoiceId::Joanna)
-            .engine(aws_sdk_polly::types::Engine::Neural)
-            .send()
-            .await?;
-        let blob = resp.audio_stream.collect().await?;
-        Ok(blob.into_bytes())
-    }
-
-    async fn play_audio(&self, src: &[u8]) -> Result<(), anyhow::Error> {
-        let mut wav = soloud::audio::Wav::default();
-        wav.load_mem(src)?;
-        self.speaker.play(&wav);
-        while self.speaker.voice_count() > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await
-        }
-        Ok(())
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
@@ -133,7 +87,9 @@ async fn main() -> anyhow::Result<()> {
             };
             #[cfg(not(feature = "pronounce"))]
             if cmd.speak {
-                anyhow::bail!("speak command specified, but this has not been compiled with `pronounce`");
+                anyhow::bail!(
+                    "speak command specified, but this has not been compiled with `pronounce`"
+                );
             }
 
             let patterns: Result<Vec<_>, _> = cmd
