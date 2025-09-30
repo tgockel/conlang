@@ -10,13 +10,14 @@ description = "Construct languages from phonetics, to orthography, to grammar, t
 
 [dependencies]
 anyhow = "^1.0.71"
-aws-config = { version = "^1.6.3", optional = true }
-aws-sdk-polly = { version = "^1.74.0", optional = true }
+aws-config = { version = "^1.8.6", optional = true, default-features = false }
+aws-sdk-polly = { version = "^1.89.0", optional = true, default-features = false }
 bytes = "1.4.0"
 clap = { version = "^4.3.1", features = ["derive"] }
 cpal = { version = "^0.15.3", optional = true }
 itertools = "^0.11.0"
 rand = "^0.8.5"
+rustls = { version = "0.23.32", optional = true, default-features = false, features = ["ring"] }
 smallvec = "^1.10.0"
 thiserror = "^1.0.43"
 tokio = { version = "^1.28.2", features = ["rt-multi-thread", "macros", "fs", "time"] }
@@ -28,7 +29,7 @@ name = "conlang"
 
 [features]
 default = ["pronounce"]
-pronounce = ["dep:aws-config", "dep:aws-sdk-polly", "dep:cpal"]
+pronounce = ["dep:aws-config", "dep:aws-sdk-polly", "dep:cpal", "dep:rustls"]
 
 # Compile dependencies with optimization
 [profile.dev.package."*"]

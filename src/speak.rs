@@ -12,7 +12,7 @@ pub struct SpeakerBox {
 
 impl SpeakerBox {
     pub async fn new() -> Result<Self, anyhow::Error> {
-        let aws_conf = aws_config::from_env().load().await;
+        let aws_conf = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let polly = aws_sdk_polly::Client::new(&aws_conf);
         let speaker = soloud::Soloud::default()?;
         Ok(Self { polly, speaker })
