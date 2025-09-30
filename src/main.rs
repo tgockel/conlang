@@ -1,7 +1,9 @@
 use anyhow::anyhow;
+#[cfg(feature = "pronounce")]
 use bytes::Bytes;
 use clap::Parser;
 use itertools::Itertools;
+#[cfg(feature = "pronounce")]
 use soloud::{AudioExt, LoadExt};
 use std::fmt::Write;
 
@@ -59,11 +61,13 @@ struct GenerateSyllablesCmd {
     pub speak: bool,
 }
 
+#[cfg(feature = "pronounce")]
 struct SpeakerBox {
     polly: aws_sdk_polly::Client,
     speaker: soloud::Soloud,
 }
 
+#[cfg(feature = "pronounce")]
 impl SpeakerBox {
     pub async fn new() -> Result<Self, anyhow::Error> {
         let aws_conf = aws_config::from_env().load().await;
@@ -105,7 +109,7 @@ impl SpeakerBox {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
     match cmd {
         Command::GenerateSyllables(cmd) => {
@@ -121,11 +125,16 @@ async fn main() {
                 cmd.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
             );
 
+            #[cfg(feature = "pronounce")]
             let speaker = if cmd.speak {
                 Some(SpeakerBox::new().await.unwrap())
             } else {
                 None
             };
+            #[cfg(not(feature = "pronounce"))]
+            if cmd.speak {
+                anyhow::bail!("speak command specified, but this has not been compiled with `pronounce`");
+            }
 
             let patterns: Result<Vec<_>, _> = cmd
                 .pattern
@@ -150,10 +159,13 @@ async fn main() {
                 let word = pattern.generate(&mut rng);
                 let ipa = word.iter().join(" ");
                 println!("{}", ipa);
+
+                #[cfg(feature = "pronounce")]
                 if let Some(speaker) = speaker.as_ref() {
                     speaker.speak(&ipa).await.unwrap();
                 }
             }
+            Ok(())
         }
     }
 }
