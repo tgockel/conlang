@@ -15,11 +15,11 @@ aws-sdk-polly = { version = "^1.89.0", optional = true, default-features = false
 bitflags = "2.11.0"
 bytes = "1.4.0"
 clap = { version = "^4.3.1", features = ["derive"] }
-itertools = "^0.11.0"
-rand = "^0.8.5"
-rodio = { version = "^0.20", optional = true, default-features = false, features = ["vorbis"] }
+itertools = "^0.14.0"
+rand = "^0.10.0"
+rodio = { version = "^0.22.2", optional = true, default-features = false, features = ["playback", "vorbis"] }
 smallvec = "^1.10.0"
-thiserror = "^1.0.43"
+thiserror = "^2.0.18"
 tokio = { version = "^1.28.2", features = ["rt-multi-thread", "macros", "fs", "time"] }
 
 [lib]

@@ -105,10 +105,10 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => panic!("{e}"),
             };
 
-            let mut rng = rand::thread_rng();
-            use rand::Rng;
-            for idx in rand::thread_rng()
-                .sample_iter(rand::distributions::Uniform::new(0, patterns.len()))
+            let mut rng = rand::rng();
+            use rand::RngExt;
+            for idx in rand::rng()
+                .sample_iter(rand::distr::Uniform::new(0, patterns.len()).unwrap())
                 .take(100)
             {
                 let pattern = &patterns[idx];

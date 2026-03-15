@@ -6,18 +6,17 @@ use bytes::Bytes;
 
 pub struct SpeakerBox {
     polly: aws_sdk_polly::Client,
-    sink: rodio::Sink,
-    _stream: rodio::OutputStream,
+    sink: rodio::Player,
+    _stream: rodio::MixerDeviceSink,
 }
 
 impl SpeakerBox {
     pub async fn new() -> Result<Self, anyhow::Error> {
         let aws_conf = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let polly = aws_sdk_polly::Client::new(&aws_conf);
-        let (_stream, handle) = rodio::OutputStream::try_default()
+        let _stream = rodio::DeviceSinkBuilder::open_default_sink()
             .map_err(|e| anyhow::anyhow!("Failed to open audio output: {e}"))?;
-        let sink = rodio::Sink::try_new(&handle)
-            .map_err(|e| anyhow::anyhow!("Failed to create audio sink: {e}"))?;
+        let sink = rodio::Player::connect_new(_stream.mixer());
         Ok(Self {
             polly,
             sink,
