@@ -68,12 +68,12 @@ impl fmt::Debug for WordGenerator {
 
 #[derive(Clone, PartialEq)]
 pub struct SyllableGenerator {
-    phonemes: SmallVec<[PhonemeGenerator; 4]>,
+    phonemes: SmallVec<[SegmentGenerator; 4]>,
 }
 
 impl SyllableGenerator {
     pub fn generate(&self, rng: &mut impl Rng) -> phone::Syllable {
-        let mut out = SmallVec::<[phone::Phoneme; 4]>::with_capacity(self.phonemes.len());
+        let mut out = SmallVec::<[phone::Segment; 4]>::with_capacity(self.phonemes.len());
         for ph in self.phonemes.iter() {
             out.push(ph.generate(rng));
         }
@@ -85,7 +85,7 @@ impl SyllableGenerator {
         let mut phonemes = SmallVec::new();
         let mut rem = src;
         while !rem.is_empty() {
-            let (phoneme, leftover) = PhonemeGenerator::parse(rem, inventory)?;
+            let (phoneme, leftover) = SegmentGenerator::parse(rem, inventory)?;
             phonemes.push(phoneme);
             rem = leftover;
         }
@@ -108,13 +108,13 @@ impl fmt::Display for SyllableGenerator {
 }
 
 #[derive(Clone)]
-pub struct PhonemeGenerator {
+pub struct SegmentGenerator {
     display: String,
-    choices: SmallVec<[phone::Phoneme; 8]>,
+    choices: SmallVec<[phone::Segment; 8]>,
     weights: SmallVec<[u8; 8]>,
 }
 
-impl PhonemeGenerator {
+impl SegmentGenerator {
     pub(super) fn parse<'a>(
         src: &'a str,
         inventory: &phone::Inventory,
@@ -124,22 +124,22 @@ impl PhonemeGenerator {
         };
 
         match first {
-            'C' => Ok(Self::from_character_class(src, inventory.consonants())),
-            'V' => Ok(Self::from_character_class(src, inventory.vowels())),
+            'C' => Ok(Self::from_segments(src, inventory.consonants())),
+            'V' => Ok(Self::from_segments(src, inventory.vowels())),
             '[' => todo!(),
             '(' => todo!(),
             _ => {
                 if let Ok(places) = phone::Place::try_from(first) {
-                    Ok(Self::from_character_class_filtered(
+                    Ok(Self::from_segments_filtered(
                         src,
                         inventory.consonants(),
-                        |x| places.contains(&x.place()),
+                        |x| x.place().is_some_and(|p| places.contains(&p)),
                     ))
                 } else if let Ok(manners) = phone::Manner::try_from(first) {
-                    Ok(Self::from_character_class_filtered(
+                    Ok(Self::from_segments_filtered(
                         src,
                         inventory.consonants(),
-                        |x| manners.contains(&x.manner()),
+                        |x| x.manner().is_some_and(|m| manners.contains(&m)),
                     ))
                 } else {
                     todo!()
@@ -148,52 +148,46 @@ impl PhonemeGenerator {
         }
     }
 
-    fn from_character_class<'a, T: Into<phone::Phoneme> + Copy>(
-        src: &'a str,
-        options: &[T],
-    ) -> (Self, &'a str) {
+    fn from_segments<'a>(src: &'a str, options: &[phone::Segment]) -> (Self, &'a str) {
         let out = Self {
             display: src[..1].into(),
-            choices: options.iter().map(|x| (*x).into()).collect(),
+            choices: options.iter().copied().collect(),
             weights: SmallVec::new(),
         };
         (out, &src[1..])
     }
 
-    fn from_character_class_filtered<'a, T: Into<phone::Phoneme> + Copy>(
+    fn from_segments_filtered<'a>(
         src: &'a str,
-        options: &[T],
-        filter: impl Fn(&T) -> bool,
+        options: &[phone::Segment],
+        filter: impl Fn(&phone::Segment) -> bool,
     ) -> (Self, &'a str) {
         let out = Self {
             display: src[..1].into(),
-            choices: options
-                .iter()
-                .filter_map(|x| if filter(x) { Some((*x).into()) } else { None })
-                .collect(),
+            choices: options.iter().filter(|x| filter(x)).copied().collect(),
             weights: SmallVec::new(),
         };
         (out, &src[1..])
     }
 
-    pub fn generate(&self, rng: &mut impl Rng) -> phone::Phoneme {
+    pub fn generate(&self, rng: &mut impl Rng) -> phone::Segment {
         self.choices[rng.next_u64() as usize % self.choices.len()]
     }
 }
 
-impl PartialEq for PhonemeGenerator {
+impl PartialEq for SegmentGenerator {
     fn eq(&self, other: &Self) -> bool {
         self.choices == other.choices && self.weights == other.weights
     }
 }
 
-impl fmt::Display for PhonemeGenerator {
+impl fmt::Display for SegmentGenerator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&self.display)
     }
 }
 
-impl fmt::Debug for PhonemeGenerator {
+impl fmt::Debug for SegmentGenerator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Phoneme({self})")
     }

@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
     match cmd {
         Command::GenerateSyllables(cmd) => {
-            let inventory = phone::Inventory::new(
+            let inventory = phone::Inventory::from_base_phones(
                 cmd.consonants
                     .as_ref()
                     .map(|x| &x[..])

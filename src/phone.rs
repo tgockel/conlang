@@ -3,6 +3,7 @@
 //! Phonetics form the basis of spoken language. This module contains `Phoneme`s as the basic building block of the
 //! language and `Syllable`s to tie them together.
 
+use bitflags::bitflags;
 use smallvec::{SmallVec, smallvec};
 use std::{
     error::Error,
@@ -16,6 +17,8 @@ pub enum ParseError {
     NoInput,
     TooManyCharacters,
     UnknownCharacter(char),
+    /// A tie bar (◌͡◌) was found without a following base phone.
+    InvalidTieBar,
 }
 
 impl fmt::Display for ParseError {
@@ -24,6 +27,7 @@ impl fmt::Display for ParseError {
             Self::NoInput => write!(f, "no input"),
             Self::TooManyCharacters => write!(f, "too many characters in input"),
             Self::UnknownCharacter(c) => write!(f, "unknown character '{c}'"),
+            Self::InvalidTieBar => write!(f, "tie bar without following base phone"),
         }
     }
 }
@@ -600,6 +604,7 @@ pub enum Manner {
     LateralFricative,
     Approximant,
     LateralApproximant,
+    Affricate,
 }
 
 impl Manner {
@@ -610,6 +615,7 @@ impl Manner {
             'T' => Ok(smallvec![Self::Trill]),
             'X' => Ok(smallvec![Self::Fricative, Self::LateralFricative]),
             'R' => Ok(smallvec![Self::Approximant, Self::LateralApproximant]),
+            'A' => Ok(smallvec![Self::Affricate]),
             _ => Err(ParseError::UnknownCharacter(value)),
         }
     }
@@ -909,6 +915,534 @@ impl fmt::Display for Frontness {
     }
 }
 
+bitflags! {
+    /// Diacritical modifiers that can be applied to a base phone.
+    ///
+    /// Each flag corresponds to a single IPA combining character or modifier letter.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Diacritics: u32 {
+        // Phonation
+        const ASPIRATED       = 1 << 0;  // ʰ (U+02B0)
+        const VOICELESS       = 1 << 1;  // ̥  (U+0325)
+        const VOICED          = 1 << 2;  // ̬  (U+032C)
+        const BREATHY_VOICE   = 1 << 3;  // ̤  (U+0324)
+        const CREAKY_VOICE    = 1 << 4;  // ̰  (U+0330)
+
+        // Secondary articulation
+        const LABIALIZED      = 1 << 5;  // ʷ (U+02B7)
+        const PALATALIZED     = 1 << 6;  // ʲ (U+02B2)
+        const VELARIZED       = 1 << 7;  // ˠ (U+02E0)
+        const PHARYNGEALIZED  = 1 << 8;  // ˤ (U+02E4)
+        const NASALIZED       = 1 << 9;  // ̃  (U+0303)
+
+        // Length
+        const LONG            = 1 << 10; // ː (U+02D0)
+        const HALF_LONG       = 1 << 11; // ˑ (U+02D1)
+
+        // Place refinement
+        const DENTAL          = 1 << 12; // ̪  (U+032A)
+        const APICAL          = 1 << 13; // ̺  (U+033A)
+        const LAMINAL         = 1 << 14; // ̻  (U+033B)
+        const ADVANCED        = 1 << 15; // ̟  (U+031F)
+        const RETRACTED       = 1 << 16; // ̠  (U+0320)
+
+        // Vowel refinement
+        const MORE_ROUNDED    = 1 << 17; // ̹  (U+0339)
+        const LESS_ROUNDED    = 1 << 18; // ̜  (U+031C)
+        const RAISED          = 1 << 19; // ̝  (U+031D)
+        const LOWERED         = 1 << 20; // ̞  (U+031E)
+
+        // Release
+        const NO_AUDIBLE_RELEASE = 1 << 21; // ̚ (U+031A)
+        const LATERAL_RELEASE    = 1 << 22; // ˡ (U+02E1)
+        const NASAL_RELEASE      = 1 << 23; // ⁿ (U+207F)
+
+        // Syllabicity
+        const SYLLABIC           = 1 << 24; // ̩ (U+0329)
+        const NON_SYLLABIC       = 1 << 25; // ̯ (U+032F)
+
+        // Other
+        const RHOTACIZED         = 1 << 26; // ˞ (U+02DE)
+        const CENTRALIZED        = 1 << 27; // ̈  (U+0308)
+    }
+}
+
+impl Diacritics {
+    /// Try to parse a single character as a diacritic modifier.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            'ʰ' => Some(Self::ASPIRATED),
+            '\u{0325}' => Some(Self::VOICELESS),
+            '\u{032C}' => Some(Self::VOICED),
+            '\u{0324}' => Some(Self::BREATHY_VOICE),
+            '\u{0330}' => Some(Self::CREAKY_VOICE),
+            'ʷ' => Some(Self::LABIALIZED),
+            'ʲ' => Some(Self::PALATALIZED),
+            'ˠ' => Some(Self::VELARIZED),
+            'ˤ' => Some(Self::PHARYNGEALIZED),
+            '\u{0303}' => Some(Self::NASALIZED),
+            'ː' => Some(Self::LONG),
+            'ˑ' => Some(Self::HALF_LONG),
+            '\u{032A}' => Some(Self::DENTAL),
+            '\u{033A}' => Some(Self::APICAL),
+            '\u{033B}' => Some(Self::LAMINAL),
+            '\u{031F}' => Some(Self::ADVANCED),
+            '\u{0320}' => Some(Self::RETRACTED),
+            '\u{0339}' => Some(Self::MORE_ROUNDED),
+            '\u{031C}' => Some(Self::LESS_ROUNDED),
+            '\u{031D}' => Some(Self::RAISED),
+            '\u{031E}' => Some(Self::LOWERED),
+            '\u{031A}' => Some(Self::NO_AUDIBLE_RELEASE),
+            'ˡ' => Some(Self::LATERAL_RELEASE),
+            'ⁿ' => Some(Self::NASAL_RELEASE),
+            '\u{0329}' => Some(Self::SYLLABIC),
+            '\u{032F}' => Some(Self::NON_SYLLABIC),
+            '\u{02DE}' => Some(Self::RHOTACIZED),
+            '\u{0308}' => Some(Self::CENTRALIZED),
+            _ => None,
+        }
+    }
+
+    /// Emit the IPA characters for the set diacritics in canonical order.
+    ///
+    /// Order: combining marks (below, then above), then modifier letters, then length.
+    fn write_ipa(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Combining marks below
+        if self.contains(Self::VOICELESS) {
+            f.write_char('\u{0325}')?;
+        }
+        if self.contains(Self::VOICED) {
+            f.write_char('\u{032C}')?;
+        }
+        if self.contains(Self::BREATHY_VOICE) {
+            f.write_char('\u{0324}')?;
+        }
+        if self.contains(Self::CREAKY_VOICE) {
+            f.write_char('\u{0330}')?;
+        }
+        if self.contains(Self::DENTAL) {
+            f.write_char('\u{032A}')?;
+        }
+        if self.contains(Self::APICAL) {
+            f.write_char('\u{033A}')?;
+        }
+        if self.contains(Self::LAMINAL) {
+            f.write_char('\u{033B}')?;
+        }
+        if self.contains(Self::ADVANCED) {
+            f.write_char('\u{031F}')?;
+        }
+        if self.contains(Self::RETRACTED) {
+            f.write_char('\u{0320}')?;
+        }
+        if self.contains(Self::MORE_ROUNDED) {
+            f.write_char('\u{0339}')?;
+        }
+        if self.contains(Self::LESS_ROUNDED) {
+            f.write_char('\u{031C}')?;
+        }
+        if self.contains(Self::RAISED) {
+            f.write_char('\u{031D}')?;
+        }
+        if self.contains(Self::LOWERED) {
+            f.write_char('\u{031E}')?;
+        }
+        if self.contains(Self::NO_AUDIBLE_RELEASE) {
+            f.write_char('\u{031A}')?;
+        }
+        if self.contains(Self::SYLLABIC) {
+            f.write_char('\u{0329}')?;
+        }
+        if self.contains(Self::NON_SYLLABIC) {
+            f.write_char('\u{032F}')?;
+        }
+        // Combining marks above
+        if self.contains(Self::NASALIZED) {
+            f.write_char('\u{0303}')?;
+        }
+        if self.contains(Self::CENTRALIZED) {
+            f.write_char('\u{0308}')?;
+        }
+        // Modifier letters
+        if self.contains(Self::ASPIRATED) {
+            f.write_char('ʰ')?;
+        }
+        if self.contains(Self::LABIALIZED) {
+            f.write_char('ʷ')?;
+        }
+        if self.contains(Self::PALATALIZED) {
+            f.write_char('ʲ')?;
+        }
+        if self.contains(Self::VELARIZED) {
+            f.write_char('ˠ')?;
+        }
+        if self.contains(Self::PHARYNGEALIZED) {
+            f.write_char('ˤ')?;
+        }
+        if self.contains(Self::LATERAL_RELEASE) {
+            f.write_char('ˡ')?;
+        }
+        if self.contains(Self::NASAL_RELEASE) {
+            f.write_char('ⁿ')?;
+        }
+        if self.contains(Self::RHOTACIZED) {
+            f.write_char('\u{02DE}')?;
+        }
+        // Length (last)
+        if self.contains(Self::LONG) {
+            f.write_char('ː')?;
+        }
+        if self.contains(Self::HALF_LONG) {
+            f.write_char('ˑ')?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Diacritics {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.write_ipa(f)
+    }
+}
+
+/// A single phonetic segment: one base phone with optional diacritics,
+/// or two base phones joined by a tie bar (affricate / co-articulation).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Segment {
+    Simple {
+        base: Phoneme,
+        diacritics: Diacritics,
+    },
+    Compound {
+        first: Phoneme,
+        second: Phoneme,
+        diacritics: Diacritics,
+    },
+}
+
+impl Segment {
+    /// Create a simple segment from a base phoneme with no diacritics.
+    pub fn simple(base: Phoneme) -> Self {
+        Self::Simple {
+            base,
+            diacritics: Diacritics::empty(),
+        }
+    }
+
+    /// Create a simple segment with diacritics.
+    pub fn with_diacritics(base: Phoneme, diacritics: Diacritics) -> Self {
+        Self::Simple { base, diacritics }
+    }
+
+    /// Create a compound segment (affricate or co-articulation).
+    pub fn compound(first: Phoneme, second: Phoneme) -> Self {
+        Self::Compound {
+            first,
+            second,
+            diacritics: Diacritics::empty(),
+        }
+    }
+
+    /// Create a compound segment with diacritics.
+    pub fn compound_with_diacritics(
+        first: Phoneme,
+        second: Phoneme,
+        diacritics: Diacritics,
+    ) -> Self {
+        Self::Compound {
+            first,
+            second,
+            diacritics,
+        }
+    }
+
+    /// The base phoneme (for Simple) or first component (for Compound).
+    pub fn base(&self) -> Phoneme {
+        match self {
+            Self::Simple { base, .. } => *base,
+            Self::Compound { first, .. } => *first,
+        }
+    }
+
+    /// Whether this segment acts as a consonant in syllable structure.
+    pub fn is_consonantal(&self) -> bool {
+        match self {
+            Self::Simple { base, .. } => matches!(
+                base,
+                Phoneme::Consonant(_) | Phoneme::NonPulmonicConsonant(_)
+            ),
+            Self::Compound { .. } => true,
+        }
+    }
+
+    /// Whether this segment acts as a vowel in syllable structure.
+    pub fn is_vocalic(&self) -> bool {
+        matches!(
+            self,
+            Self::Simple {
+                base: Phoneme::Vowel(_),
+                ..
+            }
+        )
+    }
+
+    /// Place of articulation, if this is a consonantal segment.
+    /// For compounds, returns the place of the first element.
+    pub fn place(&self) -> Option<Place> {
+        match self {
+            Self::Simple {
+                base: Phoneme::Consonant(c),
+                ..
+            } => Some(c.place()),
+            Self::Compound {
+                first: Phoneme::Consonant(c),
+                ..
+            } => Some(c.place()),
+            _ => None,
+        }
+    }
+
+    /// Manner of articulation.
+    /// For compounds, returns `Manner::Affricate`.
+    pub fn manner(&self) -> Option<Manner> {
+        match self {
+            Self::Simple {
+                base: Phoneme::Consonant(c),
+                ..
+            } => Some(c.manner()),
+            Self::Compound { .. } => Some(Manner::Affricate),
+            _ => None,
+        }
+    }
+
+    pub fn diacritics(&self) -> Diacritics {
+        match self {
+            Self::Simple { diacritics, .. } | Self::Compound { diacritics, .. } => *diacritics,
+        }
+    }
+
+    pub fn has_diacritic(&self, d: Diacritics) -> bool {
+        self.diacritics().contains(d)
+    }
+
+    /// Parse a single segment from the beginning of an IPA string.
+    /// Returns the parsed segment and the remaining unparsed input.
+    pub fn parse_ipa(input: &str) -> Result<(Self, &str), ParseError> {
+        let mut chars = input.char_indices();
+
+        // Read base character
+        let (_, first_char) = chars.next().ok_or(ParseError::NoInput)?;
+        let base = Phoneme::try_from(first_char)?;
+
+        // Peek at next char: tie bar?
+        let after_base = chars.clone();
+        if let Some((_, '\u{0361}')) = chars.next() {
+            // Compound segment: read second base
+            let (_, second_char) = chars.next().ok_or(ParseError::InvalidTieBar)?;
+            let second = Phoneme::try_from(second_char)?;
+
+            // Collect diacritics
+            let mut diacritics = Diacritics::empty();
+            loop {
+                let checkpoint = chars.clone();
+                match chars.next() {
+                    Some((_, c)) => match Diacritics::from_char(c) {
+                        Some(d) => diacritics |= d,
+                        None => {
+                            // Not a diacritic; put it back
+                            chars = checkpoint;
+                            break;
+                        }
+                    },
+                    None => break,
+                }
+            }
+
+            let remaining = match chars.next() {
+                Some((idx, _)) => &input[idx..],
+                None => "",
+            };
+            Ok((
+                Self::Compound {
+                    first: base,
+                    second,
+                    diacritics,
+                },
+                remaining,
+            ))
+        } else {
+            // Simple segment: collect diacritics
+            let mut chars = after_base;
+            let mut diacritics = Diacritics::empty();
+            loop {
+                let checkpoint = chars.clone();
+                match chars.next() {
+                    Some((_, c)) => match Diacritics::from_char(c) {
+                        Some(d) => diacritics |= d,
+                        None => {
+                            chars = checkpoint;
+                            break;
+                        }
+                    },
+                    None => break,
+                }
+            }
+
+            let remaining = match chars.next() {
+                Some((idx, _)) => &input[idx..],
+                None => "",
+            };
+            Ok((Self::Simple { base, diacritics }, remaining))
+        }
+    }
+}
+
+impl From<Phoneme> for Segment {
+    fn from(p: Phoneme) -> Self {
+        Self::simple(p)
+    }
+}
+
+impl From<Consonant> for Segment {
+    fn from(c: Consonant) -> Self {
+        Self::simple(Phoneme::Consonant(c))
+    }
+}
+
+impl From<Vowel> for Segment {
+    fn from(v: Vowel) -> Self {
+        Self::simple(Phoneme::Vowel(v))
+    }
+}
+
+impl From<NonPulmonicConsonant> for Segment {
+    fn from(c: NonPulmonicConsonant) -> Self {
+        Self::simple(Phoneme::NonPulmonicConsonant(c))
+    }
+}
+
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Simple { base, diacritics } => {
+                write!(f, "{base}")?;
+                diacritics.write_ipa(f)?;
+            }
+            Self::Compound {
+                first,
+                second,
+                diacritics,
+            } => {
+                write!(f, "{first}\u{0361}{second}")?;
+                diacritics.write_ipa(f)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+/// Stress level for a syllable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Stress {
+    #[default]
+    None,
+    /// Primary stress (ˈ, U+02C8).
+    Primary,
+    /// Secondary stress (ˌ, U+02CC).
+    Secondary,
+}
+
+impl Stress {
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            'ˈ' => Some(Self::Primary),
+            'ˌ' => Some(Self::Secondary),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Stress {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::None => Ok(()),
+            Self::Primary => f.write_char('ˈ'),
+            Self::Secondary => f.write_char('ˌ'),
+        }
+    }
+}
+
+/// Tone contour represented as a sequence of tone levels.
+///
+/// Each level is 1-5, mapping to IPA tone letters ˩˨˧˦˥.
+/// An empty tone means no tone marking.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Tone {
+    levels: SmallVec<[u8; 3]>,
+}
+
+impl Tone {
+    /// Create a level (register) tone.
+    pub fn level(n: u8) -> Self {
+        assert!((1..=5).contains(&n));
+        Self {
+            levels: smallvec![n],
+        }
+    }
+
+    /// Create a contour tone from a sequence of levels.
+    pub fn contour(ns: &[u8]) -> Self {
+        for &n in ns {
+            assert!((1..=5).contains(&n));
+        }
+        Self {
+            levels: SmallVec::from(ns),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.levels.is_empty()
+    }
+
+    fn tone_letter(level: u8) -> char {
+        match level {
+            1 => '˩', // U+02E9
+            2 => '˨', // U+02E8
+            3 => '˧', // U+02E7
+            4 => '˦', // U+02E6
+            5 => '˥', // U+02E5
+            _ => unreachable!(),
+        }
+    }
+
+    /// Try to parse a tone letter character as a tone level.
+    pub fn level_from_char(c: char) -> Option<u8> {
+        match c {
+            '˩' => Some(1),
+            '˨' => Some(2),
+            '˧' => Some(3),
+            '˦' => Some(4),
+            '˥' => Some(5),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Tone {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for &level in &self.levels {
+            f.write_char(Self::tone_letter(level))?;
+        }
+        Ok(())
+    }
+}
+
 /// Represents one of the phoneme types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Phoneme {
@@ -964,27 +1498,113 @@ impl TryFrom<char> for Phoneme {
 
 #[derive(Clone)]
 pub struct Syllable {
-    inner: smallvec::SmallVec<[Phoneme; 8]>,
+    inner: SmallVec<[Segment; 8]>,
+    stress: Stress,
+    tone: Tone,
 }
 
 impl Syllable {
-    pub fn new(seq: &[Phoneme]) -> Self {
-        let inner = smallvec::SmallVec::from(seq);
-        Self { inner }
+    pub fn new(seq: &[Segment]) -> Self {
+        let inner = SmallVec::from(seq);
+        Self {
+            inner,
+            stress: Stress::None,
+            tone: Tone::default(),
+        }
     }
 
-    pub fn parts(&self) -> &[Phoneme] {
+    pub fn with_stress(mut self, s: Stress) -> Self {
+        self.stress = s;
+        self
+    }
+
+    pub fn with_tone(mut self, t: Tone) -> Self {
+        self.tone = t;
+        self
+    }
+
+    pub fn segments(&self) -> &[Segment] {
         self.inner.as_slice()
+    }
+
+    pub fn stress(&self) -> Stress {
+        self.stress
+    }
+
+    pub fn tone(&self) -> &Tone {
+        &self.tone
+    }
+
+    /// Parse an IPA string into a syllable, handling stress marks, segments with
+    /// diacritics/tie bars, and trailing tone letters.
+    pub fn parse_ipa(input: &str) -> Result<Self, ParseError> {
+        if input.is_empty() {
+            return Err(ParseError::NoInput);
+        }
+
+        let mut remaining = input;
+
+        // Check for leading stress mark
+        let stress = remaining.chars().next().and_then(Stress::from_char);
+        if stress.is_some() {
+            remaining = &remaining[remaining.chars().next().unwrap().len_utf8()..];
+        }
+        let stress = stress.unwrap_or(Stress::None);
+
+        // Parse segments until we hit tone letters or end
+        let mut segments = SmallVec::<[Segment; 8]>::new();
+        while !remaining.is_empty() {
+            // Check if the next char is a tone letter
+            if remaining
+                .chars()
+                .next()
+                .and_then(Tone::level_from_char)
+                .is_some()
+            {
+                break;
+            }
+            let (seg, rest) = Segment::parse_ipa(remaining)?;
+            segments.push(seg);
+            remaining = rest;
+        }
+
+        // Collect trailing tone letters
+        let mut tone_levels = SmallVec::<[u8; 3]>::new();
+        for c in remaining.chars() {
+            match Tone::level_from_char(c) {
+                Some(level) => tone_levels.push(level),
+                None => return Err(ParseError::UnknownCharacter(c)),
+            }
+        }
+        let tone = if tone_levels.is_empty() {
+            Tone::default()
+        } else {
+            Tone {
+                levels: tone_levels,
+            }
+        };
+
+        if segments.is_empty() {
+            return Err(ParseError::NoInput);
+        }
+
+        Ok(Self {
+            inner: segments,
+            stress,
+            tone,
+        })
     }
 }
 
 impl PartialEq for Syllable {
     fn eq(&self, other: &Self) -> bool {
-        self.parts().len() == other.parts().len()
+        self.stress == other.stress
+            && self.tone == other.tone
+            && self.segments().len() == other.segments().len()
             && self
-                .parts()
+                .segments()
                 .iter()
-                .zip(other.parts().iter())
+                .zip(other.segments().iter())
                 .all(|(a, b)| a == b)
     }
 }
@@ -993,9 +1613,11 @@ impl Eq for Syllable {}
 
 impl fmt::Display for Syllable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for p in self.parts() {
-            write!(f, "{p}")?;
+        write!(f, "{}", self.stress)?;
+        for seg in self.segments() {
+            write!(f, "{seg}")?;
         }
+        write!(f, "{}", self.tone)?;
         Ok(())
     }
 }
@@ -1010,59 +1632,80 @@ impl FromStr for Syllable {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut ps = Vec::with_capacity(s.len() * 2);
-        for c in s.chars() {
-            ps.push(Phoneme::try_from(c)?);
-        }
-        Ok(Self::new(&ps))
+        Self::parse_ipa(s)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Inventory {
-    consonants: Vec<Consonant>,
-    vowels: Vec<Vowel>,
-    non_pulmonic_consonants: Vec<NonPulmonicConsonant>,
+    consonants: Vec<Segment>,
+    vowels: Vec<Segment>,
+    tones: Vec<Tone>,
 }
 
 impl Inventory {
-    pub fn new(
-        consonants: impl Into<Vec<Consonant>>,
-        vowels: impl Into<Vec<Vowel>>,
-        non_pulmonic_consonants: impl Into<Vec<NonPulmonicConsonant>>,
+    /// Build an inventory from bare base phones (backward-compatible path).
+    /// Non-pulmonic consonants are folded into the consonants collection.
+    pub fn from_base_phones(
+        consonants: &[Consonant],
+        vowels: &[Vowel],
+        non_pulmonic_consonants: &[NonPulmonicConsonant],
     ) -> Self {
         Self {
-            consonants: consonants.into(),
-            vowels: vowels.into(),
-            non_pulmonic_consonants: non_pulmonic_consonants.into(),
+            consonants: consonants
+                .iter()
+                .map(|&c| Segment::from(c))
+                .chain(non_pulmonic_consonants.iter().map(|&c| Segment::from(c)))
+                .collect(),
+            vowels: vowels.iter().map(|&v| Segment::from(v)).collect(),
+            tones: Vec::new(),
         }
     }
 
+    /// Build an inventory with all base phones.
     pub fn with_everything() -> Self {
-        Self::new(Consonant::all(), Vowel::all(), NonPulmonicConsonant::all())
+        Self::from_base_phones(Consonant::all(), Vowel::all(), NonPulmonicConsonant::all())
     }
 
-    pub fn consonants(&self) -> &[Consonant] {
+    pub fn consonants(&self) -> &[Segment] {
         &self.consonants
     }
 
-    pub fn vowels(&self) -> &[Vowel] {
+    pub fn vowels(&self) -> &[Segment] {
         &self.vowels
     }
 
-    pub fn non_pulmonic_consonants(&self) -> &[NonPulmonicConsonant] {
-        &self.non_pulmonic_consonants
+    pub fn tones(&self) -> &[Tone] {
+        &self.tones
+    }
+
+    /// Add a consonantal segment to the inventory.
+    pub fn add_consonant(&mut self, seg: Segment) {
+        self.consonants.push(seg);
+    }
+
+    /// Add an affricate (compound segment) to the consonant inventory.
+    pub fn add_affricate(&mut self, first: Consonant, second: Consonant) {
+        self.consonants.push(Segment::compound(
+            Phoneme::Consonant(first),
+            Phoneme::Consonant(second),
+        ));
+    }
+
+    /// Add a tone to the language's tone inventory.
+    pub fn add_tone(&mut self, tone: Tone) {
+        self.tones.push(tone);
     }
 }
 
 impl fmt::Display for Inventory {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for c in self.consonants.iter() {
-            f.write_char(c.code())?;
+            write!(f, "{c}")?;
         }
         f.write_char(' ')?;
         for v in self.vowels.iter() {
-            f.write_char(v.code())?;
+            write!(f, "{v}")?;
         }
         Ok(())
     }
@@ -1110,5 +1753,186 @@ mod tests {
 
         // There should not be any codes shared between phonic classes
         assert_eq!(vec.len(), set.len());
+    }
+
+    #[test]
+    fn segment_simple_display() {
+        let seg = Segment::simple(Phoneme::Consonant(Consonant::T));
+        assert_eq!(format!("{seg}"), "t");
+    }
+
+    #[test]
+    fn segment_with_diacritics_display() {
+        let seg = Segment::with_diacritics(Phoneme::Consonant(Consonant::T), Diacritics::ASPIRATED);
+        assert_eq!(format!("{seg}"), "tʰ");
+    }
+
+    #[test]
+    fn segment_compound_display() {
+        let seg = Segment::compound(
+            Phoneme::Consonant(Consonant::T),
+            Phoneme::Consonant(Consonant::Esh),
+        );
+        assert_eq!(format!("{seg}"), "t\u{0361}ʃ");
+    }
+
+    #[test]
+    fn segment_compound_with_diacritics_display() {
+        let seg = Segment::compound_with_diacritics(
+            Phoneme::Consonant(Consonant::T),
+            Phoneme::Consonant(Consonant::Esh),
+            Diacritics::ASPIRATED,
+        );
+        assert_eq!(format!("{seg}"), "t\u{0361}ʃʰ");
+    }
+
+    #[test]
+    fn segment_is_consonantal() {
+        assert!(Segment::from(Consonant::T).is_consonantal());
+        assert!(Segment::from(NonPulmonicConsonant::BilabialClick).is_consonantal());
+        assert!(!Segment::from(Vowel::A).is_consonantal());
+        assert!(
+            Segment::compound(
+                Phoneme::Consonant(Consonant::T),
+                Phoneme::Consonant(Consonant::S),
+            )
+            .is_consonantal()
+        );
+    }
+
+    #[test]
+    fn segment_is_vocalic() {
+        assert!(Segment::from(Vowel::A).is_vocalic());
+        assert!(!Segment::from(Consonant::T).is_vocalic());
+    }
+
+    #[test]
+    fn segment_manner_affricate() {
+        let seg = Segment::compound(
+            Phoneme::Consonant(Consonant::T),
+            Phoneme::Consonant(Consonant::Esh),
+        );
+        assert_eq!(seg.manner(), Some(Manner::Affricate));
+    }
+
+    #[test]
+    fn diacritics_multiple() {
+        let d = Diacritics::ASPIRATED | Diacritics::NASALIZED;
+        let seg = Segment::with_diacritics(Phoneme::Vowel(Vowel::A), d);
+        let s = format!("{seg}");
+        assert!(s.contains('ʰ'));
+        assert!(s.contains('\u{0303}'));
+    }
+
+    #[test]
+    fn stress_display() {
+        assert_eq!(format!("{}", Stress::Primary), "ˈ");
+        assert_eq!(format!("{}", Stress::Secondary), "ˌ");
+        assert_eq!(format!("{}", Stress::None), "");
+    }
+
+    #[test]
+    fn tone_display() {
+        assert_eq!(format!("{}", Tone::level(5)), "˥");
+        assert_eq!(format!("{}", Tone::contour(&[5, 1])), "˥˩");
+        assert_eq!(format!("{}", Tone::default()), "");
+    }
+
+    #[test]
+    fn syllable_with_stress_and_tone() {
+        let syl = Syllable::new(&[Segment::from(Consonant::T), Segment::from(Vowel::A)])
+            .with_stress(Stress::Primary)
+            .with_tone(Tone::contour(&[5, 1]));
+        assert_eq!(format!("{syl}"), "ˈta˥˩");
+    }
+
+    #[test]
+    fn segment_parse_simple() {
+        let (seg, rest) = Segment::parse_ipa("ta").unwrap();
+        assert_eq!(seg, Segment::from(Consonant::T));
+        assert_eq!(rest, "a");
+    }
+
+    #[test]
+    fn segment_parse_with_diacritic() {
+        let (seg, rest) = Segment::parse_ipa("tʰa").unwrap();
+        assert_eq!(
+            seg,
+            Segment::with_diacritics(Phoneme::Consonant(Consonant::T), Diacritics::ASPIRATED,)
+        );
+        assert_eq!(rest, "a");
+    }
+
+    #[test]
+    fn segment_parse_compound() {
+        let input = "t\u{0361}ʃa";
+        let (seg, rest) = Segment::parse_ipa(input).unwrap();
+        assert_eq!(
+            seg,
+            Segment::compound(
+                Phoneme::Consonant(Consonant::T),
+                Phoneme::Consonant(Consonant::Esh),
+            )
+        );
+        assert_eq!(rest, "a");
+    }
+
+    #[test]
+    fn syllable_parse_ipa_simple() {
+        let syl = Syllable::parse_ipa("ta").unwrap();
+        assert_eq!(syl.segments().len(), 2);
+        assert_eq!(syl.stress(), Stress::None);
+        assert!(syl.tone().is_empty());
+    }
+
+    #[test]
+    fn syllable_parse_ipa_with_stress() {
+        let syl = Syllable::parse_ipa("ˈta").unwrap();
+        assert_eq!(syl.stress(), Stress::Primary);
+        assert_eq!(syl.segments().len(), 2);
+    }
+
+    #[test]
+    fn syllable_parse_ipa_with_tone() {
+        let syl = Syllable::parse_ipa("ta˥˩").unwrap();
+        assert_eq!(syl.tone(), &Tone::contour(&[5, 1]));
+        assert_eq!(syl.segments().len(), 2);
+    }
+
+    #[test]
+    fn syllable_roundtrip() {
+        // Build a complex syllable and verify display -> parse roundtrip
+        let seg1 = Segment::compound_with_diacritics(
+            Phoneme::Consonant(Consonant::T),
+            Phoneme::Consonant(Consonant::Esh),
+            Diacritics::ASPIRATED,
+        );
+        let seg2 = Segment::with_diacritics(Phoneme::Vowel(Vowel::A), Diacritics::LONG);
+        let syl = Syllable::new(&[seg1, seg2])
+            .with_stress(Stress::Primary)
+            .with_tone(Tone::contour(&[5, 1]));
+        let displayed = format!("{syl}");
+        let parsed = Syllable::parse_ipa(&displayed).unwrap();
+        assert_eq!(syl, parsed);
+    }
+
+    #[test]
+    fn inventory_fold_non_pulmonics() {
+        let inv = Inventory::from_base_phones(
+            &[Consonant::T, Consonant::K],
+            &[Vowel::A],
+            &[NonPulmonicConsonant::BilabialClick],
+        );
+        // Non-pulmonics should be folded into consonants
+        assert_eq!(inv.consonants().len(), 3);
+        assert!(inv.consonants().iter().all(|s| s.is_consonantal()));
+    }
+
+    #[test]
+    fn inventory_add_affricate() {
+        let mut inv = Inventory::from_base_phones(&[Consonant::T], &[Vowel::A], &[]);
+        inv.add_affricate(Consonant::T, Consonant::Esh);
+        assert_eq!(inv.consonants().len(), 2);
+        assert_eq!(inv.consonants()[1].manner(), Some(Manner::Affricate));
     }
 }

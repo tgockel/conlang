@@ -18,7 +18,11 @@ impl SpeakerBox {
             .map_err(|e| anyhow::anyhow!("Failed to open audio output: {e}"))?;
         let sink = rodio::Sink::try_new(&handle)
             .map_err(|e| anyhow::anyhow!("Failed to create audio sink: {e}"))?;
-        Ok(Self { polly, sink, _stream })
+        Ok(Self {
+            polly,
+            sink,
+            _stream,
+        })
     }
 
     pub async fn speak(&self, ipa: &str) -> Result<(), anyhow::Error> {
