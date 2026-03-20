@@ -100,7 +100,17 @@ async fn main() -> anyhow::Result<()> {
                             .unwrap_or(phone::Vowel::all()),
                         cmd.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
                     );
-                    (inventory, None, HashMap::new(), cmd.pattern)
+                    let weights = generate::InventoryWeights {
+                        consonant_weights: Some(sketch::cosine_weights(
+                            inventory.consonants().len(),
+                            0.0,
+                        )),
+                        vowel_weights: Some(sketch::cosine_weights(
+                            inventory.vowels().len(),
+                            0.0,
+                        )),
+                    };
+                    (inventory, Some(weights), HashMap::new(), cmd.pattern)
                 };
 
             #[cfg(feature = "pronounce")]

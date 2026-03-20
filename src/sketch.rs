@@ -133,7 +133,8 @@ fn resolve_consonant_set(
     match set {
         PhonemeSet::Simple(s) => {
             let segs = parse_consonant_string(&s)?;
-            Ok((segs, None))
+            let weights = cosine_weights(segs.len(), 0.0);
+            Ok((segs, Some(weights)))
         }
         PhonemeSet::WithDistribution { values, distribution } => {
             let segs = parse_consonant_string(&values)?;
@@ -165,7 +166,8 @@ fn resolve_vowel_set(
     match set {
         PhonemeSet::Simple(s) => {
             let segs = parse_vowel_string(&s)?;
-            Ok((segs, None))
+            let weights = cosine_weights(segs.len(), 0.0);
+            Ok((segs, Some(weights)))
         }
         PhonemeSet::WithDistribution { values, distribution } => {
             let segs = parse_vowel_string(&values)?;
@@ -226,7 +228,7 @@ fn compute_weights(count: usize, dist: &Distribution) -> Result<Vec<u32>, Sketch
 ///
 /// For k phonemes, the weight of the nth is the integral of (cos(x) + a)
 /// from n*pi/(2k) to (n+1)*pi/(2k).
-fn cosine_weights(count: usize, a: f64) -> Vec<u32> {
+pub fn cosine_weights(count: usize, a: f64) -> Vec<u32> {
     let k = count as f64;
     let scale = 10_000.0;
     (0..count)
@@ -300,8 +302,10 @@ mod tests {
         let resolved = Sketch::load(json).unwrap();
         assert_eq!(resolved.inventory.consonants().len(), 3);
         assert_eq!(resolved.inventory.vowels().len(), 3);
-        assert!(resolved.consonant_weights.is_none());
-        assert!(resolved.vowel_weights.is_none());
+        let cw = resolved.consonant_weights.unwrap();
+        assert_eq!(cw.len(), 3);
+        let vw = resolved.vowel_weights.unwrap();
+        assert_eq!(vw.len(), 3);
         assert_eq!(resolved.patterns, vec!["CVC"]);
     }
 
@@ -354,7 +358,7 @@ mod tests {
             "patterns": ["CV"]
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert!(resolved.consonant_weights.is_none());
+        assert_eq!(resolved.consonant_weights.unwrap().len(), 3);
         assert_eq!(resolved.vowel_weights.unwrap(), vec![50, 30]);
     }
 
