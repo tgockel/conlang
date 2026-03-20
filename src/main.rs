@@ -3,6 +3,8 @@ use clap::Parser;
 use itertools::Itertools;
 use std::fmt::Write;
 
+use std::collections::HashMap;
+
 use conlang::{generate, phone, sketch};
 
 #[cfg(feature = "pronounce")]
@@ -71,29 +73,35 @@ async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
     match cmd {
         Command::GenerateSyllables(cmd) => {
-            let (inventory, weights, pattern_strings) = if let Some(config_path) = &cmd.config {
-                let contents = std::fs::read_to_string(config_path)?;
-                let resolved = sketch::Sketch::load(&contents)
-                    .map_err(|e| anyhow!("failed to load config: {e}"))?;
-                let weights = generate::InventoryWeights {
-                    consonant_weights: resolved.consonant_weights,
-                    vowel_weights: resolved.vowel_weights,
+            let (inventory, weights, named_sets, pattern_strings) =
+                if let Some(config_path) = &cmd.config {
+                    let contents = std::fs::read_to_string(config_path)?;
+                    let resolved = sketch::Sketch::load(&contents)
+                        .map_err(|e| anyhow!("failed to load config: {e}"))?;
+                    let weights = generate::InventoryWeights {
+                        consonant_weights: resolved.consonant_weights,
+                        vowel_weights: resolved.vowel_weights,
+                    };
+                    (
+                        resolved.inventory,
+                        Some(weights),
+                        resolved.named_sets,
+                        resolved.patterns,
+                    )
+                } else {
+                    let inventory = phone::Inventory::from_base_phones(
+                        cmd.consonants
+                            .as_ref()
+                            .map(|x| &x[..])
+                            .unwrap_or(phone::Consonant::all()),
+                        cmd.vowels
+                            .as_ref()
+                            .map(|x| &x[..])
+                            .unwrap_or(phone::Vowel::all()),
+                        cmd.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
+                    );
+                    (inventory, None, HashMap::new(), cmd.pattern)
                 };
-                (resolved.inventory, Some(weights), resolved.patterns)
-            } else {
-                let inventory = phone::Inventory::from_base_phones(
-                    cmd.consonants
-                        .as_ref()
-                        .map(|x| &x[..])
-                        .unwrap_or(phone::Consonant::all()),
-                    cmd.vowels
-                        .as_ref()
-                        .map(|x| &x[..])
-                        .unwrap_or(phone::Vowel::all()),
-                    cmd.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
-                );
-                (inventory, None, cmd.pattern)
-            };
 
             #[cfg(feature = "pronounce")]
             let speaker = if cmd.speak {
@@ -108,10 +116,15 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
 
+            let ctx = generate::ParseContext {
+                inventory: &inventory,
+                weights: weights.as_ref(),
+                named_sets: &named_sets,
+            };
             let patterns: Result<Vec<_>, _> = pattern_strings
                 .iter()
                 .map(|p| {
-                    generate::WordGenerator::parse(p, &inventory, weights.as_ref())
+                    generate::WordGenerator::parse(p, &ctx)
                         .map_err(|e| format!("Could not parse pattern \"{p}\": {e}"))
                 })
                 .collect();

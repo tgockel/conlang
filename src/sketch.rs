@@ -5,6 +5,8 @@
 
 use crate::phone;
 use serde::Deserialize;
+use smallvec::SmallVec;
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,6 +19,20 @@ pub enum SketchError {
     Validation(String),
 }
 
+/// A single entry in a named set: either a plain IPA string or one with an explicit weight.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum NamedSetEntry {
+    Simple(String),
+    Weighted { value: String, weight: u32 },
+}
+
+/// A resolved named set: each choice is a sequence of segments (to support clusters).
+pub struct NamedSet {
+    pub choices: Vec<SmallVec<[phone::Segment; 2]>>,
+    pub weights: Option<Vec<u32>>,
+}
+
 /// A language sketch loaded from JSON.
 #[derive(Debug, Deserialize)]
 pub struct Sketch {
@@ -24,6 +40,7 @@ pub struct Sketch {
     pub vowels: Option<PhonemeSet>,
     pub non_pulmonics: Option<String>,
     pub others: Option<String>,
+    pub sets: Option<HashMap<String, Vec<NamedSetEntry>>>,
     pub patterns: Vec<String>,
 }
 
@@ -59,6 +76,7 @@ pub struct Resolved {
     pub inventory: phone::Inventory,
     pub consonant_weights: Option<Vec<u32>>,
     pub vowel_weights: Option<Vec<u32>>,
+    pub named_sets: HashMap<String, NamedSet>,
     pub patterns: Vec<String>,
 }
 
@@ -94,10 +112,16 @@ impl Sketch {
 
         let inventory = phone::Inventory::from_segments(all_consonants, vowels);
 
+        let named_sets = match self.sets {
+            Some(sets) => resolve_named_sets(sets)?,
+            None => HashMap::new(),
+        };
+
         Ok(Resolved {
             inventory,
             consonant_weights,
             vowel_weights,
+            named_sets,
             patterns: self.patterns,
         })
     }
@@ -214,6 +238,52 @@ fn cosine_weights(count: usize, a: f64) -> Vec<u32> {
             (weight * scale).round() as u32
         })
         .collect()
+}
+
+fn parse_segment_sequence(s: &str) -> Result<SmallVec<[phone::Segment; 2]>, phone::ParseError> {
+    let mut segs = SmallVec::new();
+    let mut remaining = s;
+    while !remaining.is_empty() {
+        let (seg, rest) = phone::Segment::parse_ipa(remaining)?;
+        segs.push(seg);
+        remaining = rest;
+    }
+    Ok(segs)
+}
+
+fn resolve_named_sets(
+    sets: HashMap<String, Vec<NamedSetEntry>>,
+) -> Result<HashMap<String, NamedSet>, SketchError> {
+    let mut result = HashMap::new();
+    for (name, entries) in sets {
+        if entries.is_empty() {
+            return Err(SketchError::Validation(format!(
+                "named set {name:?} is empty"
+            )));
+        }
+        let has_weights = entries
+            .iter()
+            .any(|e| matches!(e, NamedSetEntry::Weighted { .. }));
+        let mut choices = Vec::with_capacity(entries.len());
+        let mut weights = if has_weights {
+            Some(Vec::with_capacity(entries.len()))
+        } else {
+            None
+        };
+        for entry in entries {
+            let (value, weight) = match entry {
+                NamedSetEntry::Simple(s) => (s, 1),
+                NamedSetEntry::Weighted { value, weight } => (value, weight),
+            };
+            let segs = parse_segment_sequence(&value)?;
+            choices.push(segs);
+            if let Some(ref mut w) = weights {
+                w.push(weight);
+            }
+        }
+        result.insert(name, NamedSet { choices, weights });
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -347,5 +417,68 @@ mod tests {
         assert_eq!(resolved.inventory.consonants().len(), 2);
         // Both should be compound segments
         assert!(resolved.inventory.consonants()[0].manner() == Some(phone::Manner::Affricate));
+    }
+
+    #[test]
+    fn named_set_single_segments() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "sets": {
+                "O": ["p", "t", "k"]
+            },
+            "patterns": ["$OV"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let onset = &resolved.named_sets["O"];
+        assert_eq!(onset.choices.len(), 3);
+        assert!(onset.weights.is_none());
+    }
+
+    #[test]
+    fn named_set_with_clusters() {
+        let json = r#"{
+            "consonants": "ptksl",
+            "vowels": "a",
+            "sets": {
+                "O": ["p", "st", "pl"]
+            },
+            "patterns": ["$OV"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let onset = &resolved.named_sets["O"];
+        assert_eq!(onset.choices.len(), 3);
+        // "st" should have 2 segments
+        assert_eq!(onset.choices[1].len(), 2);
+    }
+
+    #[test]
+    fn named_set_weighted() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "a",
+            "sets": {
+                "O": ["p", {"value": "t", "weight": 5}]
+            },
+            "patterns": ["$OV"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let onset = &resolved.named_sets["O"];
+        assert_eq!(onset.choices.len(), 2);
+        let w = onset.weights.as_ref().unwrap();
+        assert_eq!(w, &[1, 5]);
+    }
+
+    #[test]
+    fn named_set_empty_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "a",
+            "sets": {
+                "O": []
+            },
+            "patterns": ["$OV"]
+        }"#;
+        assert!(Sketch::load(json).is_err());
     }
 }

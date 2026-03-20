@@ -96,3 +96,71 @@ Nasal-only codas with optional fricative onsets:
 conlang generate-syllables --consonants ptkbdgmnŋsʃfvlr --vowels aeiou \
     --pattern "(X)VN"
 ```
+
+## Named Sets `$name`
+
+Named sets let you define custom groups of phonemes (including consonant clusters) in the JSON sketch and reference them
+by name in patterns.
+This is essential for phonotactic constraints where the set of allowed segments differs by position -- for example,
+onsets allowing clusters like /st/ or /pl/ while codas allow /ks/ or /nd/.
+
+### Defining sets in JSON
+
+Add a `"sets"` field to your sketch.
+Each key is a set name (referenced as `$<name>` in patterns), and each value is an array of IPA strings:
+
+```json
+{
+  "consonants": "pbtdkgmnŋfvszhrl",
+  "vowels": "aeiou",
+  "sets": {
+    "O": ["p", "b", "t", "d", "st", "sp", "tr", "pl"],
+    "K": ["p", "t", "k", "m", "n", "ŋ", "nd", "ks"],
+    "longer": ["ŋ", "d", "b"]
+  },
+  "patterns": ["$OV$K", "$OV", "V$K", "V${longer}"]
+}
+```
+
+Each entry in the array can be:
+
+* A single segment: `"p"`, `"ŋ"`
+* A cluster (multi-segment sequence): `"st"`, `"pl"`, `"nd"`
+* A weighted entry: `{"value": "st", "weight": 5}` -- plain strings get weight 1 when any entry has an explicit weight
+
+### Using sets in patterns
+
+Reference a named set with `$` followed by the set name.
+For single-character names, use `$O` directly.
+For multi-character names, use curly braces: `${onset}`.
+
+| Pattern                | Meaning                                                  |
+|:-----------------------|:---------------------------------------------------------|
+| `$OV$K`                | Onset from set O, then vowel, then coda from set K      |
+| `${onset}V${coda}`     | Same, using multi-character set names                    |
+| `$OV`                  | Onset from set O, then vowel (open syllable)             |
+| `($O)V$K`              | Optional onset from set O, then vowel, then coda         |
+| `(${onset})V${coda}`   | Same with braces                                         |
+
+### Onset and coda restrictions
+
+Named sets are the primary way to express positional constraints.
+For example, English allows /st/ as an onset cluster but not as a coda, while /ks/ is a valid coda but not an onset:
+
+```json
+"sets": {
+  "O": ["n", "t", "s", "st", "sp", "sk", "tɹ", "pɹ", "pl", "bl", "kl"],
+  "K": ["n", "t", "s", "k", "ŋ", "nd", "nt", "ns", "ks", "lz", "lk"]
+}
+```
+
+### Weighted sets
+
+If any entry in a set uses the weighted form, all entries participate in weighted random selection.
+Plain strings receive weight 1:
+
+```json
+"O": ["p", "t", {"value": "st", "weight": 5}]
+```
+
+Here, "st" is five times more likely to be selected than "p" or "t".
