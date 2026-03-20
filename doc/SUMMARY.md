@@ -1,8 +1,8 @@
 # Summary
 
-[Introduction](intro.md)
+[Introduction](README.md)
 
-- [Languages](./lang/overview.md)
+- [Languages](./lang/README.md)
   - [Phonemes](./lang/phonemes.md)
   - [Phonotactics](./lang/phonotactics.md)
   - [Frequencies](./lang/frequencies.md)
