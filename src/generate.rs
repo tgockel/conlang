@@ -4,7 +4,8 @@
 
 use crate::phone;
 use crate::sketch;
-use rand::Rng;
+use itertools::Itertools;
+use rand::{Rng, RngExt};
 use smallvec::{smallvec, SmallVec};
 use std::collections::HashMap;
 use std::fmt;
@@ -370,6 +371,49 @@ impl fmt::Debug for SegmentGenerator {
     }
 }
 
+/// Format a single word as IPA: syllables joined by `.` (IPA syllable boundary).
+pub fn format_word(word: &[phone::Syllable]) -> String {
+    word.iter().join(".")
+}
+
+/// Format a sentence as IPA: words separated by spaces, syllables within words by `.`.
+pub fn format_sentence(sentence: &[SmallVec<[phone::Syllable; 4]>]) -> String {
+    sentence.iter().map(|w| format_word(w)).join(" ")
+}
+
+/// Generates sentences: sequences of words, each chosen from the pattern pool.
+pub struct SentenceGenerator<'a> {
+    patterns: &'a [WordGenerator],
+    min_words: u32,
+    max_words: u32,
+}
+
+impl<'a> SentenceGenerator<'a> {
+    pub fn new(patterns: &'a [WordGenerator], min_words: u32, max_words: u32) -> Self {
+        Self {
+            patterns,
+            min_words,
+            max_words,
+        }
+    }
+
+    pub fn generate(&self, rng: &mut impl Rng) -> Vec<SmallVec<[phone::Syllable; 4]>> {
+        let word_count = if self.min_words == self.max_words {
+            self.min_words
+        } else {
+            rng.random_range(self.min_words..=self.max_words)
+        };
+
+        let pattern_count = self.patterns.len();
+        (0..word_count)
+            .map(|_| {
+                let idx = rng.random_range(0..pattern_count);
+                self.patterns[idx].generate(rng)
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod gen_tests {
     use super::*;
@@ -712,5 +756,98 @@ mod gen_tests {
             WordGenerator::parse("${nope}V", &ctx(&inventory)),
             Err(ParseError::UnknownSet(_))
         ));
+    }
+
+    #[test]
+    fn format_word_single_syllable() {
+        let syl = phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::K),
+            phone::Segment::from(phone::Vowel::A),
+        ]);
+        assert_eq!(format_word(&[syl]), "ka");
+    }
+
+    #[test]
+    fn format_word_multi_syllable() {
+        let s1 = phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::K),
+            phone::Segment::from(phone::Vowel::I),
+        ]);
+        let s2 = phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::P),
+            phone::Segment::from(phone::Vowel::A),
+        ]);
+        assert_eq!(format_word(&[s1, s2]), "ki.pa");
+    }
+
+    #[test]
+    fn format_sentence_basic() {
+        let w1: SmallVec<[phone::Syllable; 4]> = smallvec![
+            phone::Syllable::new(&[
+                phone::Segment::from(phone::Consonant::K),
+                phone::Segment::from(phone::Vowel::A),
+            ]),
+            phone::Syllable::new(&[
+                phone::Segment::from(phone::Consonant::T),
+                phone::Segment::from(phone::Vowel::I),
+            ]),
+        ];
+        let w2: SmallVec<[phone::Syllable; 4]> = smallvec![phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::P),
+            phone::Segment::from(phone::Vowel::U),
+        ])];
+        assert_eq!(format_sentence(&[w1, w2]), "ka.ti pu");
+    }
+
+    #[test]
+    fn sentence_fixed_count() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
+        let sg = SentenceGenerator::new(&patterns, 4, 4);
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let sentence = sg.generate(&mut rng);
+            assert_eq!(sentence.len(), 4);
+        }
+    }
+
+    #[test]
+    fn sentence_word_count_range() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
+        let sg = SentenceGenerator::new(&patterns, 3, 5);
+        let mut rng = rand::rng();
+        let mut counts = std::collections::HashSet::new();
+        for _ in 0..200 {
+            let sentence = sg.generate(&mut rng);
+            assert!((3..=5).contains(&sentence.len()), "got {} words", sentence.len());
+            counts.insert(sentence.len());
+        }
+        assert_eq!(counts.len(), 3, "expected all word counts 3-5 to appear");
+    }
+
+    #[test]
+    fn sentence_varied_patterns() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![
+            WordGenerator::parse("CV", &ctx(&inventory)).unwrap(),
+            WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap(),
+        ];
+        let sg = SentenceGenerator::new(&patterns, 5, 5);
+        let mut rng = rand::rng();
+        let mut had_one_syl = false;
+        let mut had_two_syl = false;
+        for _ in 0..200 {
+            let sentence = sg.generate(&mut rng);
+            for word in &sentence {
+                match word.len() {
+                    1 => had_one_syl = true,
+                    2 => had_two_syl = true,
+                    _ => panic!("unexpected syllable count: {}", word.len()),
+                }
+            }
+        }
+        assert!(had_one_syl, "no 1-syllable words generated");
+        assert!(had_two_syl, "no 2-syllable words generated");
     }
 }

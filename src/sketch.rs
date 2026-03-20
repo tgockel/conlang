@@ -33,6 +33,13 @@ pub struct NamedSet {
     pub weights: Option<Vec<u32>>,
 }
 
+/// Configuration for sentence generation.
+#[derive(Debug, Deserialize)]
+pub struct SentenceConfig {
+    /// `[min, max]` inclusive range for word count per sentence.
+    pub words: [u32; 2],
+}
+
 /// A language sketch loaded from JSON.
 #[derive(Debug, Deserialize)]
 pub struct Sketch {
@@ -42,6 +49,7 @@ pub struct Sketch {
     pub others: Option<String>,
     pub sets: Option<HashMap<String, Vec<NamedSetEntry>>>,
     pub patterns: Vec<String>,
+    pub sentence: Option<SentenceConfig>,
 }
 
 /// Three ways to specify a set of phonemes, matching the documented JSON formats.
@@ -78,6 +86,7 @@ pub struct Resolved {
     pub vowel_weights: Option<Vec<u32>>,
     pub named_sets: HashMap<String, NamedSet>,
     pub patterns: Vec<String>,
+    pub sentence: Option<SentenceConfig>,
 }
 
 impl Sketch {
@@ -89,6 +98,19 @@ impl Sketch {
     pub fn resolve(self) -> Result<Resolved, SketchError> {
         if self.patterns.is_empty() {
             return Err(SketchError::Validation("patterns must not be empty".into()));
+        }
+
+        if let Some(ref sc) = self.sentence {
+            if sc.words[0] == 0 {
+                return Err(SketchError::Validation(
+                    "sentence.words minimum must be at least 1".into(),
+                ));
+            }
+            if sc.words[0] > sc.words[1] {
+                return Err(SketchError::Validation(
+                    "sentence.words minimum must not exceed maximum".into(),
+                ));
+            }
         }
 
         let (consonants, consonant_weights) = match self.consonants {
@@ -123,6 +145,7 @@ impl Sketch {
             vowel_weights,
             named_sets,
             patterns: self.patterns,
+            sentence: self.sentence,
         })
     }
 }
@@ -482,6 +505,52 @@ mod tests {
                 "O": []
             },
             "patterns": ["$OV"]
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn sentence_config_loads() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"],
+            "sentence": { "words": [3, 8] }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let sc = resolved.sentence.unwrap();
+        assert_eq!(sc.words, [3, 8]);
+    }
+
+    #[test]
+    fn sentence_config_absent() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert!(resolved.sentence.is_none());
+    }
+
+    #[test]
+    fn sentence_config_min_zero_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"],
+            "sentence": { "words": [0, 5] }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn sentence_config_min_exceeds_max_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"],
+            "sentence": { "words": [8, 3] }
         }"#;
         assert!(Sketch::load(json).is_err());
     }
