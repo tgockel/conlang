@@ -8,6 +8,13 @@ use smallvec::SmallVec;
 use std::fmt;
 use thiserror::Error;
 
+/// Optional per-category weights to use during generation.
+/// When a field is `None`, uniform distribution is used for that category.
+pub struct InventoryWeights {
+    pub consonant_weights: Option<Vec<u32>>,
+    pub vowel_weights: Option<Vec<u32>>,
+}
+
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("no input")]
@@ -40,11 +47,15 @@ impl WordGenerator {
         out
     }
 
-    pub fn parse(src: &str, inventory: &phone::Inventory) -> Result<Self, ParseError> {
+    pub fn parse(
+        src: &str,
+        inventory: &phone::Inventory,
+        weights: Option<&InventoryWeights>,
+    ) -> Result<Self, ParseError> {
         let mut syllables = SmallVec::new();
 
         for syl_src in src.split_ascii_whitespace() {
-            syllables.push(SyllableGenerator::parse(syl_src, inventory)?);
+            syllables.push(SyllableGenerator::parse(syl_src, inventory, weights)?);
         }
 
         if syllables.is_empty() {
@@ -93,11 +104,15 @@ impl SyllableGenerator {
         phone::Syllable::new(out.as_slice())
     }
 
-    pub(super) fn parse(src: &str, inventory: &phone::Inventory) -> Result<Self, ParseError> {
+    pub(super) fn parse(
+        src: &str,
+        inventory: &phone::Inventory,
+        weights: Option<&InventoryWeights>,
+    ) -> Result<Self, ParseError> {
         let mut phonemes = SmallVec::new();
         let mut rem = src;
         while !rem.is_empty() {
-            let (phoneme, leftover) = SegmentGenerator::parse(rem, inventory)?;
+            let (phoneme, leftover) = SegmentGenerator::parse(rem, inventory, weights)?;
             phonemes.push(phoneme);
             rem = leftover;
         }
@@ -123,7 +138,7 @@ impl fmt::Display for SyllableGenerator {
 pub struct SegmentGenerator {
     display: String,
     choices: SmallVec<[phone::Segment; 8]>,
-    weights: SmallVec<[u8; 8]>,
+    weights: SmallVec<[u32; 8]>,
     optional: bool,
 }
 
@@ -131,14 +146,18 @@ impl SegmentGenerator {
     pub(super) fn parse<'a>(
         src: &'a str,
         inventory: &phone::Inventory,
+        weights: Option<&InventoryWeights>,
     ) -> Result<(Self, &'a str), ParseError> {
         let Some(first) = src.chars().nth(0) else {
             return Err(ParseError::NoInput);
         };
 
+        let c_weights = weights.and_then(|w| w.consonant_weights.as_deref());
+        let v_weights = weights.and_then(|w| w.vowel_weights.as_deref());
+
         match first {
-            'C' => Ok(Self::from_segments(src, inventory.consonants())),
-            'V' => Ok(Self::from_segments(src, inventory.vowels())),
+            'C' => Ok(Self::from_segments(src, inventory.consonants(), c_weights)),
+            'V' => Ok(Self::from_segments(src, inventory.vowels(), v_weights)),
             '[' => {
                 let close = src.find(']').ok_or(ParseError::UnclosedBracket)?;
                 let inner = &src[1..close];
@@ -173,7 +192,7 @@ impl SegmentGenerator {
                     return Err(ParseError::EmptyParen);
                 }
 
-                let (mut inner_gen, leftover) = Self::parse(inner, inventory)?;
+                let (mut inner_gen, leftover) = Self::parse(inner, inventory, weights)?;
                 if !leftover.is_empty() {
                     return Err(ParseError::UnknownCharacter(
                         leftover.chars().next().unwrap(),
@@ -191,12 +210,14 @@ impl SegmentGenerator {
                     Ok(Self::from_segments_filtered(
                         src,
                         inventory.consonants(),
+                        c_weights,
                         |x| x.place().is_some_and(|p| places.contains(&p)),
                     ))
                 } else if let Ok(manners) = phone::Manner::try_from(first) {
                     Ok(Self::from_segments_filtered(
                         src,
                         inventory.consonants(),
+                        c_weights,
                         |x| x.manner().is_some_and(|m| manners.contains(&m)),
                     ))
                 } else {
@@ -206,12 +227,18 @@ impl SegmentGenerator {
         }
     }
 
-    fn from_segments<'a>(src: &'a str, options: &[phone::Segment]) -> (Self, &'a str) {
+    fn from_segments<'a>(
+        src: &'a str,
+        options: &[phone::Segment],
+        weights: Option<&[u32]>,
+    ) -> (Self, &'a str) {
         let first_len = src.chars().next().unwrap().len_utf8();
         let out = Self {
             display: src[..first_len].into(),
             choices: options.iter().copied().collect(),
-            weights: SmallVec::new(),
+            weights: weights
+                .map(|w| w.iter().copied().collect())
+                .unwrap_or_default(),
             optional: false,
         };
         (out, &src[first_len..])
@@ -220,13 +247,27 @@ impl SegmentGenerator {
     fn from_segments_filtered<'a>(
         src: &'a str,
         options: &[phone::Segment],
+        weights: Option<&[u32]>,
         filter: impl Fn(&phone::Segment) -> bool,
     ) -> (Self, &'a str) {
         let first_len = src.chars().next().unwrap().len_utf8();
+        let mut choices = SmallVec::new();
+        let mut filtered_weights = SmallVec::new();
+        for (i, seg) in options.iter().enumerate() {
+            if filter(seg) {
+                choices.push(*seg);
+                if let Some(w) = weights.and_then(|ws| ws.get(i)) {
+                    filtered_weights.push(*w);
+                }
+            }
+        }
+        if weights.is_none() {
+            filtered_weights = SmallVec::new();
+        }
         let out = Self {
             display: src[..first_len].into(),
-            choices: options.iter().filter(|x| filter(x)).copied().collect(),
-            weights: SmallVec::new(),
+            choices,
+            weights: filtered_weights,
             optional: false,
         };
         (out, &src[first_len..])
@@ -236,7 +277,19 @@ impl SegmentGenerator {
         if self.optional && rng.next_u64() % 2 == 0 {
             return None;
         }
-        Some(self.choices[rng.next_u64() as usize % self.choices.len()])
+        if self.weights.is_empty() {
+            Some(self.choices[rng.next_u64() as usize % self.choices.len()])
+        } else {
+            let total: u64 = self.weights.iter().map(|&w| w as u64).sum();
+            let mut roll = rng.next_u64() % total;
+            for (seg, &w) in self.choices.iter().zip(self.weights.iter()) {
+                if roll < w as u64 {
+                    return Some(*seg);
+                }
+                roll -= w as u64;
+            }
+            Some(*self.choices.last().unwrap())
+        }
     }
 }
 
@@ -270,21 +323,21 @@ mod gen_tests {
         let inventory = phone::Inventory::with_everything();
         let inputs = &["C", "V", "CV", "VVC"];
         for input in inputs.iter() {
-            WordGenerator::parse(input, &inventory).unwrap();
+            WordGenerator::parse(input, &inventory, None).unwrap();
         }
     }
 
     #[test]
     fn parse_bracket_basic() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("[ptk]VC", &inventory).unwrap();
+        let wg = WordGenerator::parse("[ptk]VC", &inventory, None).unwrap();
         assert_eq!(format!("{wg}"), "[ptk]VC");
     }
 
     #[test]
     fn parse_bracket_vowels() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("C[aiu]C", &inventory).unwrap();
+        let wg = WordGenerator::parse("C[aiu]C", &inventory, None).unwrap();
         assert_eq!(format!("{wg}"), "C[aiu]C");
     }
 
@@ -292,7 +345,7 @@ mod gen_tests {
     fn parse_bracket_empty_error() {
         let inventory = phone::Inventory::with_everything();
         assert!(matches!(
-            WordGenerator::parse("[]V", &inventory),
+            WordGenerator::parse("[]V", &inventory, None),
             Err(ParseError::EmptyBracket)
         ));
     }
@@ -301,7 +354,7 @@ mod gen_tests {
     fn parse_bracket_unclosed_error() {
         let inventory = phone::Inventory::with_everything();
         assert!(matches!(
-            WordGenerator::parse("[ptk", &inventory),
+            WordGenerator::parse("[ptk", &inventory, None),
             Err(ParseError::UnclosedBracket)
         ));
     }
@@ -310,7 +363,7 @@ mod gen_tests {
     fn parse_bracket_unknown_char_error() {
         let inventory = phone::Inventory::with_everything();
         assert!(matches!(
-            WordGenerator::parse("[pWk]", &inventory),
+            WordGenerator::parse("[pWk]", &inventory, None),
             Err(ParseError::InvalidPhoneme(_))
         ));
     }
@@ -318,14 +371,14 @@ mod gen_tests {
     #[test]
     fn parse_optional_consonant() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("(C)VC", &inventory).unwrap();
+        let wg = WordGenerator::parse("(C)VC", &inventory, None).unwrap();
         assert_eq!(format!("{wg}"), "(C)VC");
     }
 
     #[test]
     fn parse_optional_bracket() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("([ptk])VC", &inventory).unwrap();
+        let wg = WordGenerator::parse("([ptk])VC", &inventory, None).unwrap();
         assert_eq!(format!("{wg}"), "([ptk])VC");
     }
 
@@ -333,7 +386,7 @@ mod gen_tests {
     fn parse_optional_empty_error() {
         let inventory = phone::Inventory::with_everything();
         assert!(matches!(
-            WordGenerator::parse("()VC", &inventory),
+            WordGenerator::parse("()VC", &inventory, None),
             Err(ParseError::EmptyParen)
         ));
     }
@@ -342,7 +395,7 @@ mod gen_tests {
     fn parse_optional_unclosed_error() {
         let inventory = phone::Inventory::with_everything();
         assert!(matches!(
-            WordGenerator::parse("(CVC", &inventory),
+            WordGenerator::parse("(CVC", &inventory, None),
             Err(ParseError::UnclosedParen)
         ));
     }
@@ -350,13 +403,13 @@ mod gen_tests {
     #[test]
     fn parse_optional_multiple_segments_error() {
         let inventory = phone::Inventory::with_everything();
-        assert!(WordGenerator::parse("(CV)", &inventory).is_err());
+        assert!(WordGenerator::parse("(CV)", &inventory, None).is_err());
     }
 
     #[test]
     fn generate_bracket_produces_valid_segment() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("[ptk]V", &inventory).unwrap();
+        let wg = WordGenerator::parse("[ptk]V", &inventory, None).unwrap();
         let mut rng = rand::rng();
         let valid = [
             phone::Segment::from(phone::Consonant::P),
@@ -374,7 +427,7 @@ mod gen_tests {
     #[test]
     fn generate_optional_sometimes_absent() {
         let inventory = phone::Inventory::with_everything();
-        let wg = WordGenerator::parse("(C)V", &inventory).unwrap();
+        let wg = WordGenerator::parse("(C)V", &inventory, None).unwrap();
         let mut rng = rand::rng();
         let mut had_one = false;
         let mut had_two = false;

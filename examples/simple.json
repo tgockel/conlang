@@ -1,0 +1,5 @@
+{
+  "consonants": "pbtdkg",
+  "vowels": "aeiou",
+  "patterns": ["CVC", "(C)VC", "CV"]
+}

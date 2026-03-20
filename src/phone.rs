@@ -1662,6 +1662,15 @@ impl Inventory {
         }
     }
 
+    /// Build an inventory directly from pre-parsed segments.
+    pub fn from_segments(consonants: Vec<Segment>, vowels: Vec<Segment>) -> Self {
+        Self {
+            consonants,
+            vowels,
+            tones: Vec::new(),
+        }
+    }
+
     /// Build an inventory with all base phones.
     pub fn with_everything() -> Self {
         Self::from_base_phones(Consonant::all(), Vowel::all(), NonPulmonicConsonant::all())

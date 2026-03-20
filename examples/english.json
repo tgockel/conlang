@@ -1,0 +1,16 @@
+{
+  "consonants": {
+    "values": "ntsɹdlðkzmpvfbhŋʃgjθʒ",
+    "distribution": { "curve": "cosine" }
+  },
+  "vowels": {
+    "values": "əɪɛæʌɑiʊɔu",
+    "distribution": { "curve": "cosine" }
+  },
+  "patterns": [
+    "CVC",
+    "(C)VC",
+    "CVC CV",
+    "(C)V(C)"
+  ]
+}
