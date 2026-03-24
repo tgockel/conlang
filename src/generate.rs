@@ -381,20 +381,125 @@ pub fn format_sentence(sentence: &[SmallVec<[phone::Syllable; 4]>]) -> String {
     sentence.iter().map(|w| format_word(w)).join(" ")
 }
 
+/// A pre-generated vocabulary with Zipfian frequency weights.
+pub struct Lexicon {
+    words: Vec<SmallVec<[phone::Syllable; 4]>>,
+    weights: Vec<u64>,
+    total_weight: u64,
+}
+
+impl Lexicon {
+    /// Pre-generate `size` distinct words using the given patterns and optional pattern weights.
+    pub fn new(
+        size: usize,
+        patterns: &[WordGenerator],
+        pattern_weights: Option<&[u32]>,
+        rng: &mut impl Rng,
+    ) -> Self {
+        let mut words = Vec::with_capacity(size);
+        for _ in 0..size {
+            let pattern = weighted_choice(patterns, pattern_weights, rng);
+            words.push(pattern.generate(rng));
+        }
+        // Zipfian weights: rank r (1-based) gets weight proportional to 1/r.
+        // We use integer weights scaled by the LCM-ish factor `size` to avoid floats.
+        let weights: Vec<u64> = (1..=size).map(|r| (size as u64 * 1000) / r as u64).collect();
+        let total_weight: u64 = weights.iter().sum();
+        Self {
+            words,
+            weights,
+            total_weight,
+        }
+    }
+
+    /// Sample a word index from the lexicon by Zipfian frequency weight,
+    /// excluding `exclude` if provided (to prevent consecutive repeats).
+    fn sample_index(&self, exclude: Option<usize>, rng: &mut impl Rng) -> usize {
+        // When excluding an index, subtract its weight from the total.
+        let effective_total = match exclude {
+            Some(ex) => self.total_weight - self.weights[ex],
+            None => self.total_weight,
+        };
+        let mut roll = rng.next_u64() % effective_total;
+        for (i, &w) in self.weights.iter().enumerate() {
+            if exclude == Some(i) {
+                continue;
+            }
+            if roll < w {
+                return i;
+            }
+            roll -= w;
+        }
+        // Fallback: return the last non-excluded index.
+        match exclude {
+            Some(ex) if ex == self.words.len() - 1 => self.words.len() - 2,
+            _ => self.words.len() - 1,
+        }
+    }
+
+    /// Sample a word from the lexicon by Zipfian frequency weight,
+    /// excluding `prev` to prevent consecutive repeats.
+    pub fn sample(
+        &self,
+        prev: Option<usize>,
+        rng: &mut impl Rng,
+    ) -> (usize, &SmallVec<[phone::Syllable; 4]>) {
+        let idx = self.sample_index(prev, rng);
+        (idx, &self.words[idx])
+    }
+}
+
+/// Pick an item from a slice using optional weights. Falls back to uniform random.
+fn weighted_choice<'a, T>(items: &'a [T], weights: Option<&[u32]>, rng: &mut impl Rng) -> &'a T {
+    if let Some(ws) = weights {
+        let total: u64 = ws.iter().map(|&w| w as u64).sum();
+        let mut roll = rng.next_u64() % total;
+        for (item, &w) in items.iter().zip(ws.iter()) {
+            if roll < w as u64 {
+                return item;
+            }
+            roll -= w as u64;
+        }
+        items.last().unwrap()
+    } else {
+        &items[rng.next_u64() as usize % items.len()]
+    }
+}
+
 /// Generates sentences: sequences of words, each chosen from the pattern pool.
 pub struct SentenceGenerator<'a> {
     patterns: &'a [WordGenerator],
+    pattern_weights: Option<&'a [u32]>,
+    lexicon: Option<Lexicon>,
     min_words: u32,
     max_words: u32,
 }
 
 impl<'a> SentenceGenerator<'a> {
-    pub fn new(patterns: &'a [WordGenerator], min_words: u32, max_words: u32) -> Self {
+    pub fn new(
+        patterns: &'a [WordGenerator],
+        pattern_weights: Option<&'a [u32]>,
+        min_words: u32,
+        max_words: u32,
+    ) -> Self {
         Self {
             patterns,
+            pattern_weights,
+            lexicon: None,
             min_words,
             max_words,
         }
+    }
+
+    /// Enable lexicon mode: pre-generate a vocabulary and sample from it.
+    pub fn with_lexicon(mut self, size: usize, rng: &mut impl Rng) -> Self {
+        self.lexicon = Some(Lexicon::new(
+            size,
+            self.patterns,
+            self.pattern_weights,
+            rng,
+        ));
+        self
     }
 
     pub fn generate(&self, rng: &mut impl Rng) -> Vec<SmallVec<[phone::Syllable; 4]>> {
@@ -404,13 +509,19 @@ impl<'a> SentenceGenerator<'a> {
             rng.random_range(self.min_words..=self.max_words)
         };
 
-        let pattern_count = self.patterns.len();
-        (0..word_count)
-            .map(|_| {
-                let idx = rng.random_range(0..pattern_count);
-                self.patterns[idx].generate(rng)
-            })
-            .collect()
+        let mut words = Vec::with_capacity(word_count as usize);
+        let mut prev_idx: Option<usize> = None;
+        for _ in 0..word_count {
+            if let Some(ref lex) = self.lexicon {
+                let (idx, word) = lex.sample(prev_idx, rng);
+                words.push(word.clone());
+                prev_idx = Some(idx);
+            } else {
+                let pattern = weighted_choice(self.patterns, self.pattern_weights, rng);
+                words.push(pattern.generate(rng));
+            }
+        }
+        words
     }
 }
 
@@ -803,7 +914,7 @@ mod gen_tests {
     fn sentence_fixed_count() {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
-        let sg = SentenceGenerator::new(&patterns, 4, 4);
+        let sg = SentenceGenerator::new(&patterns, None, 4, 4);
         let mut rng = rand::rng();
         for _ in 0..50 {
             let sentence = sg.generate(&mut rng);
@@ -815,7 +926,7 @@ mod gen_tests {
     fn sentence_word_count_range() {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
-        let sg = SentenceGenerator::new(&patterns, 3, 5);
+        let sg = SentenceGenerator::new(&patterns, None, 3, 5);
         let mut rng = rand::rng();
         let mut counts = std::collections::HashSet::new();
         for _ in 0..200 {
@@ -833,7 +944,7 @@ mod gen_tests {
             WordGenerator::parse("CV", &ctx(&inventory)).unwrap(),
             WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap(),
         ];
-        let sg = SentenceGenerator::new(&patterns, 5, 5);
+        let sg = SentenceGenerator::new(&patterns, None, 5, 5);
         let mut rng = rand::rng();
         let mut had_one_syl = false;
         let mut had_two_syl = false;
@@ -849,5 +960,78 @@ mod gen_tests {
         }
         assert!(had_one_syl, "no 1-syllable words generated");
         assert!(had_two_syl, "no 2-syllable words generated");
+    }
+
+    #[test]
+    fn sentence_weighted_patterns() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![
+            WordGenerator::parse("CV", &ctx(&inventory)).unwrap(),
+            WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap(),
+        ];
+        // Weight heavily toward 1-syllable pattern (95 vs 5).
+        let weights = [95, 5];
+        let sg = SentenceGenerator::new(&patterns, Some(&weights), 5, 5);
+        let mut rng = rand::rng();
+        let mut one_syl = 0u32;
+        let mut two_syl = 0u32;
+        for _ in 0..200 {
+            let sentence = sg.generate(&mut rng);
+            for word in &sentence {
+                match word.len() {
+                    1 => one_syl += 1,
+                    2 => two_syl += 1,
+                    _ => panic!("unexpected syllable count: {}", word.len()),
+                }
+            }
+        }
+        // With 95:5 weighting, 1-syllable words should be the vast majority.
+        assert!(
+            one_syl > two_syl * 5,
+            "expected heavily skewed: {one_syl} monosyllabic vs {two_syl} disyllabic"
+        );
+    }
+
+    #[test]
+    fn sentence_lexicon_reuses_words() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
+        let mut rng = rand::rng();
+        let sg = SentenceGenerator::new(&patterns, None, 5, 5).with_lexicon(10, &mut rng);
+        // Generate many sentences and collect all words as strings.
+        let mut all_words = Vec::new();
+        for _ in 0..50 {
+            let sentence = sg.generate(&mut rng);
+            for word in &sentence {
+                all_words.push(format_word(word));
+            }
+        }
+        // With a lexicon of only 10 words and 250 total word slots, we must see repeats.
+        let unique: std::collections::HashSet<_> = all_words.iter().collect();
+        assert!(
+            unique.len() <= 10,
+            "lexicon of 10 should produce at most 10 distinct words, got {}",
+            unique.len()
+        );
+    }
+
+    #[test]
+    fn sentence_lexicon_no_consecutive_repeats() {
+        let inventory = phone::Inventory::with_everything();
+        let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
+        let mut rng = rand::rng();
+        // Use a tiny lexicon of 3 words to maximize collision pressure.
+        let sg = SentenceGenerator::new(&patterns, None, 8, 8).with_lexicon(3, &mut rng);
+        for _ in 0..200 {
+            let sentence = sg.generate(&mut rng);
+            let words: Vec<_> = sentence.iter().map(|w| format_word(w)).collect();
+            for pair in words.windows(2) {
+                assert_ne!(
+                    pair[0], pair[1],
+                    "consecutive duplicate found in: {}",
+                    words.join(" ")
+                );
+            }
+        }
     }
 }

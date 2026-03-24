@@ -11,5 +11,22 @@
     "O": ["n", "t", "s", "ɹ", "d", "l", "k", "m", "p", "f", "b", "h", "ʃ", "g", "j", "θ", "st", "sp", "sk", "tɹ", "pɹ", "pl", "bl", "kl"],
     "K": ["n", "t", "s", "ɹ", "d", "l", "ð", "k", "z", "m", "p", "v", "f", "ŋ", "ʃ", "θ", "nd", "nt", "ns", "ks", "lz", "lk"]
   },
-  "patterns": ["$OV$K", "$OV", "V$K", "$OV$K $OV"]
+  "patterns": [
+    {"value": "V",               "weight": 5},
+    {"value": "$OV",             "weight": 20},
+    {"value": "V$K",             "weight": 8},
+    {"value": "$OV$K",           "weight": 30},
+
+    {"value": "$OV $OV",         "weight": 4},
+    {"value": "$OV$K $OV",       "weight": 6},
+    {"value": "$OV $OV$K",       "weight": 4},
+    {"value": "V$K $OV",         "weight": 2},
+    {"value": "$OV$K $OV$K",     "weight": 5},
+
+    {"value": "$OV $OV $OV",     "weight": 2},
+    {"value": "$OV$K $OV $OV",   "weight": 2},
+    {"value": "$OV $OV $OV$K",   "weight": 2},
+    {"value": "$OV$K $OV $OV$K", "weight": 2}
+  ],
+  "lexicon": { "generate": { "size": 200 } }
 }

@@ -90,7 +90,9 @@ struct ResolvedArgs {
     weights: Option<generate::InventoryWeights>,
     named_sets: HashMap<String, sketch::NamedSet>,
     pattern_strings: Vec<String>,
+    pattern_weights: Option<Vec<u32>>,
     sentence_config: Option<[u32; 2]>,
+    lexicon_size: Option<usize>,
 }
 
 impl PhonemeArgs {
@@ -108,7 +110,9 @@ impl PhonemeArgs {
                 weights: Some(weights),
                 named_sets: resolved.named_sets,
                 pattern_strings: resolved.patterns,
+                pattern_weights: resolved.pattern_weights,
                 sentence_config: resolved.sentence.map(|sc| sc.words),
+                lexicon_size: resolved.lexicon.map(|l| l.size),
             })
         } else {
             let inventory = phone::Inventory::from_base_phones(
@@ -137,7 +141,9 @@ impl PhonemeArgs {
                 weights: Some(weights),
                 named_sets: HashMap::new(),
                 pattern_strings: self.pattern,
+                pattern_weights: None,
                 sentence_config: None,
+                lexicon_size: None,
             })
         }
     }
@@ -258,7 +264,13 @@ async fn main() -> anyhow::Result<()> {
 
             let mut rng = rand::rng();
             let [min, max] = word_range;
-            let sg = generate::SentenceGenerator::new(&patterns, min, max);
+            let pw = resolved.pattern_weights.as_deref();
+            let sg = generate::SentenceGenerator::new(&patterns, pw, min, max);
+            let sg = if let Some(size) = resolved.lexicon_size {
+                sg.with_lexicon(size, &mut rng)
+            } else {
+                sg
+            };
             for _ in 0..100 {
                 let sentence = sg.generate(&mut rng);
                 let ipa = generate::format_sentence(&sentence);

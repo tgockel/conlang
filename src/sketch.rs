@@ -40,6 +40,20 @@ pub struct SentenceConfig {
     pub words: [u32; 2],
 }
 
+/// Configuration for the lexicon.
+#[derive(Debug, Deserialize)]
+pub struct LexiconConfig {
+    /// Pre-generate a vocabulary from the phonotactic patterns.
+    pub generate: Option<LexiconGenerateConfig>,
+}
+
+/// Configuration for pre-generating a reusable vocabulary.
+#[derive(Debug, Deserialize)]
+pub struct LexiconGenerateConfig {
+    /// Number of distinct words to pre-generate.
+    pub size: usize,
+}
+
 /// A language sketch loaded from JSON.
 #[derive(Debug, Deserialize)]
 pub struct Sketch {
@@ -48,8 +62,9 @@ pub struct Sketch {
     pub non_pulmonics: Option<String>,
     pub others: Option<String>,
     pub sets: Option<HashMap<String, Vec<NamedSetEntry>>>,
-    pub patterns: Vec<String>,
+    pub patterns: Vec<NamedSetEntry>,
     pub sentence: Option<SentenceConfig>,
+    pub lexicon: Option<LexiconConfig>,
 }
 
 /// Three ways to specify a set of phonemes, matching the documented JSON formats.
@@ -86,7 +101,9 @@ pub struct Resolved {
     pub vowel_weights: Option<Vec<u32>>,
     pub named_sets: HashMap<String, NamedSet>,
     pub patterns: Vec<String>,
+    pub pattern_weights: Option<Vec<u32>>,
     pub sentence: Option<SentenceConfig>,
+    pub lexicon: Option<LexiconGenerateConfig>,
 }
 
 impl Sketch {
@@ -139,13 +156,36 @@ impl Sketch {
             None => HashMap::new(),
         };
 
+        let has_weights = self
+            .patterns
+            .iter()
+            .any(|e| matches!(e, NamedSetEntry::Weighted { .. }));
+        let mut pattern_strings = Vec::with_capacity(self.patterns.len());
+        let mut pattern_weights_vec = if has_weights {
+            Some(Vec::with_capacity(self.patterns.len()))
+        } else {
+            None
+        };
+        for entry in self.patterns {
+            let (value, weight) = match entry {
+                NamedSetEntry::Simple(s) => (s, 1),
+                NamedSetEntry::Weighted { value, weight } => (value, weight),
+            };
+            pattern_strings.push(value);
+            if let Some(ref mut w) = pattern_weights_vec {
+                w.push(weight);
+            }
+        }
+
         Ok(Resolved {
             inventory,
             consonant_weights,
             vowel_weights,
             named_sets,
-            patterns: self.patterns,
+            patterns: pattern_strings,
+            pattern_weights: pattern_weights_vec,
             sentence: self.sentence,
+            lexicon: self.lexicon.and_then(|l| l.generate),
         })
     }
 }
@@ -553,5 +593,68 @@ mod tests {
             "sentence": { "words": [8, 3] }
         }"#;
         assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn weighted_patterns() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": [
+                {"value": "CVC", "weight": 40},
+                {"value": "CV", "weight": 10}
+            ]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
+        assert_eq!(resolved.pattern_weights, Some(vec![40, 10]));
+    }
+
+    #[test]
+    fn mixed_patterns_plain_and_weighted() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC", {"value": "CV", "weight": 5}]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
+        assert_eq!(resolved.pattern_weights, Some(vec![1, 5]));
+    }
+
+    #[test]
+    fn plain_patterns_no_weights() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC", "CV"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
+        assert!(resolved.pattern_weights.is_none());
+    }
+
+    #[test]
+    fn lexicon_config_loads() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"],
+            "lexicon": { "generate": { "size": 100 } }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let lex = resolved.lexicon.unwrap();
+        assert_eq!(lex.size, 100);
+    }
+
+    #[test]
+    fn lexicon_config_absent() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "patterns": ["CVC"]
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert!(resolved.lexicon.is_none());
     }
 }
