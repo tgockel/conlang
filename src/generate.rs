@@ -381,6 +381,45 @@ pub fn format_sentence(sentence: &[SmallVec<[phone::Syllable; 4]>]) -> String {
     sentence.iter().map(|w| format_word(w)).join(" ")
 }
 
+/// Assign stress to a word's syllables according to the given strategy.
+pub fn assign_stress(
+    word: &mut SmallVec<[phone::Syllable; 4]>,
+    strategy: sketch::StressStrategy,
+    secondary: bool,
+) {
+    use sketch::StressStrategy;
+
+    if word.is_empty() || strategy == StressStrategy::None {
+        return;
+    }
+
+    if word.len() == 1 {
+        let syl = word.remove(0).with_stress(phone::Stress::Primary);
+        word.insert(0, syl);
+        return;
+    }
+
+    let primary_idx = match strategy {
+        StressStrategy::Trochaic => 0,
+        StressStrategy::Iambic => 1,
+        StressStrategy::Penultimate => word.len().saturating_sub(2),
+        StressStrategy::Final => word.len() - 1,
+        StressStrategy::None => unreachable!(),
+    };
+
+    let syl = word.remove(primary_idx).with_stress(phone::Stress::Primary);
+    word.insert(primary_idx, syl);
+
+    if secondary && word.len() >= 3 {
+        for i in (0..word.len()).step_by(2) {
+            if i != primary_idx && word[i].stress() == phone::Stress::None {
+                let syl = word.remove(i).with_stress(phone::Stress::Secondary);
+                word.insert(i, syl);
+            }
+        }
+    }
+}
+
 /// A pre-generated vocabulary with Zipfian frequency weights.
 pub struct Lexicon {
     words: Vec<SmallVec<[phone::Syllable; 4]>>,
@@ -394,12 +433,18 @@ impl Lexicon {
         size: usize,
         patterns: &[WordGenerator],
         pattern_weights: Option<&[u32]>,
+        stress: Option<sketch::StressStrategy>,
+        secondary_stress: bool,
         rng: &mut impl Rng,
     ) -> Self {
         let mut words = Vec::with_capacity(size);
         for _ in 0..size {
             let pattern = weighted_choice(patterns, pattern_weights, rng);
-            words.push(pattern.generate(rng));
+            let mut word = pattern.generate(rng);
+            if let Some(strategy) = stress {
+                assign_stress(&mut word, strategy, secondary_stress);
+            }
+            words.push(word);
         }
         // Zipfian weights: rank r (1-based) gets weight proportional to 1/r.
         // We use integer weights scaled by the LCM-ish factor `size` to avoid floats.
@@ -507,14 +552,23 @@ pub struct ClassGenerator {
     patterns: Vec<WordGenerator>,
     pattern_weights: Option<Vec<u32>>,
     lexicon: Option<Lexicon>,
+    stress: Option<sketch::StressStrategy>,
+    secondary_stress: bool,
 }
 
 impl ClassGenerator {
-    pub fn new(patterns: Vec<WordGenerator>, pattern_weights: Option<Vec<u32>>) -> Self {
+    pub fn new(
+        patterns: Vec<WordGenerator>,
+        pattern_weights: Option<Vec<u32>>,
+        stress: Option<sketch::StressStrategy>,
+        secondary_stress: bool,
+    ) -> Self {
         Self {
             patterns,
             pattern_weights,
             lexicon: None,
+            stress,
+            secondary_stress,
         }
     }
 
@@ -524,6 +578,8 @@ impl ClassGenerator {
             size,
             &self.patterns,
             self.pattern_weights.as_deref(),
+            self.stress,
+            self.secondary_stress,
             rng,
         ));
         self
@@ -540,7 +596,11 @@ impl ClassGenerator {
             (Some(idx), word.clone())
         } else {
             let pattern = weighted_choice(&self.patterns, self.pattern_weights.as_deref(), rng);
-            (None, pattern.generate(rng))
+            let mut word = pattern.generate(rng);
+            if let Some(strategy) = self.stress {
+                assign_stress(&mut word, strategy, self.secondary_stress);
+            }
+            (None, word)
         }
     }
 }
@@ -972,6 +1032,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         ];
         let sg = UnstructuredSentenceGenerator::new(classes, 4, 4);
@@ -989,6 +1051,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         ];
         let sg = UnstructuredSentenceGenerator::new(classes, 3, 5);
@@ -1009,10 +1073,14 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         ];
         let sg = UnstructuredSentenceGenerator::new(classes, 5, 5);
@@ -1037,7 +1105,7 @@ mod gen_tests {
     fn class_generator_produces_words() {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()];
-        let cg = ClassGenerator::new(patterns, None);
+        let cg = ClassGenerator::new(patterns, None, None, false);
         let mut rng = rand::rng();
         for _ in 0..50 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1051,7 +1119,7 @@ mod gen_tests {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
         let mut rng = rand::rng();
-        let cg = ClassGenerator::new(patterns, None).with_lexicon(5, &mut rng);
+        let cg = ClassGenerator::new(patterns, None, None, false).with_lexicon(5, &mut rng);
         let mut all_words = Vec::new();
         for _ in 0..100 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1071,6 +1139,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         );
         classes.insert(
@@ -1078,6 +1148,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         );
         let templates = vec![
@@ -1100,6 +1172,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         );
         classes.insert(
@@ -1107,6 +1181,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             ),
         );
         let templates = vec![
@@ -1141,6 +1217,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             )
             .with_lexicon(3, &mut rng),
         );
@@ -1149,6 +1227,8 @@ mod gen_tests {
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
                 None,
+                None,
+                false,
             )
             .with_lexicon(10, &mut rng),
         );
@@ -1165,5 +1245,101 @@ mod gen_tests {
         }
         let unique_det: std::collections::HashSet<_> = all_det_words.iter().collect();
         assert!(unique_det.len() <= 3, "det lexicon of 3 should produce at most 3 words");
+    }
+
+    fn make_syllables(n: usize) -> SmallVec<[phone::Syllable; 4]> {
+        (0..n)
+            .map(|_| {
+                phone::Syllable::new(&[
+                    phone::Segment::from(phone::Consonant::T),
+                    phone::Segment::from(phone::Vowel::A),
+                ])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn assign_stress_trochaic_monosyllable() {
+        let mut word = make_syllables(1);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
+        assert_eq!(word[0].stress(), phone::Stress::Primary);
+    }
+
+    #[test]
+    fn assign_stress_trochaic_disyllable() {
+        let mut word = make_syllables(2);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
+        assert_eq!(word[0].stress(), phone::Stress::Primary);
+        assert_eq!(word[1].stress(), phone::Stress::None);
+    }
+
+    #[test]
+    fn assign_stress_iambic() {
+        let mut word = make_syllables(2);
+        assign_stress(&mut word, sketch::StressStrategy::Iambic, false);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::Primary);
+    }
+
+    #[test]
+    fn assign_stress_penultimate() {
+        let mut word = make_syllables(3);
+        assign_stress(&mut word, sketch::StressStrategy::Penultimate, false);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::Primary);
+        assert_eq!(word[2].stress(), phone::Stress::None);
+    }
+
+    #[test]
+    fn assign_stress_final() {
+        let mut word = make_syllables(3);
+        assign_stress(&mut word, sketch::StressStrategy::Final, false);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::None);
+        assert_eq!(word[2].stress(), phone::Stress::Primary);
+    }
+
+    #[test]
+    fn assign_stress_none_leaves_unstressed() {
+        let mut word = make_syllables(3);
+        assign_stress(&mut word, sketch::StressStrategy::None, false);
+        for syl in word.iter() {
+            assert_eq!(syl.stress(), phone::Stress::None);
+        }
+    }
+
+    #[test]
+    fn assign_stress_secondary_trochaic() {
+        let mut word = make_syllables(4);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, true);
+        assert_eq!(word[0].stress(), phone::Stress::Primary);
+        assert_eq!(word[1].stress(), phone::Stress::None);
+        assert_eq!(word[2].stress(), phone::Stress::Secondary);
+        assert_eq!(word[3].stress(), phone::Stress::None);
+    }
+
+    #[test]
+    fn assign_stress_secondary_penultimate() {
+        let mut word = make_syllables(5);
+        assign_stress(&mut word, sketch::StressStrategy::Penultimate, true);
+        assert_eq!(word[0].stress(), phone::Stress::Secondary);
+        assert_eq!(word[1].stress(), phone::Stress::None);
+        assert_eq!(word[2].stress(), phone::Stress::Secondary);
+        assert_eq!(word[3].stress(), phone::Stress::Primary);
+        assert_eq!(word[4].stress(), phone::Stress::Secondary);
+    }
+
+    #[test]
+    fn assign_stress_iambic_monosyllable() {
+        let mut word = make_syllables(1);
+        assign_stress(&mut word, sketch::StressStrategy::Iambic, false);
+        assert_eq!(word[0].stress(), phone::Stress::Primary);
+    }
+
+    #[test]
+    fn assign_stress_formats_correctly() {
+        let mut word = make_syllables(2);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
+        assert_eq!(format_word(&word), "ˈta.ta");
     }
 }

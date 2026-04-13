@@ -145,6 +145,8 @@ impl PhonemeArgs {
                     patterns: self.pattern,
                     pattern_weights: None,
                     lexicon: None,
+                    stress: None,
+                    secondary_stress: false,
                 },
             );
             Ok(ResolvedArgs {
@@ -251,7 +253,12 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .map(|(_, wc)| {
                     let patterns = parse_patterns(&wc.patterns, &ctx);
-                    let mut cg = generate::ClassGenerator::new(patterns, wc.pattern_weights);
+                    let mut cg = generate::ClassGenerator::new(
+                        patterns,
+                        wc.pattern_weights,
+                        wc.stress,
+                        wc.secondary_stress,
+                    );
                     if let Some(lex) = wc.lexicon {
                         cg = cg.with_lexicon(lex.size, &mut rng);
                     }
@@ -322,7 +329,12 @@ async fn main() -> anyhow::Result<()> {
                 let mut classes = HashMap::new();
                 for (name, wc) in word_classes {
                     let patterns = parse_patterns(&wc.patterns, ctx);
-                    let mut cg = generate::ClassGenerator::new(patterns, wc.pattern_weights);
+                    let mut cg = generate::ClassGenerator::new(
+                        patterns,
+                        wc.pattern_weights,
+                        wc.stress,
+                        wc.secondary_stress,
+                    );
                     if let Some(lex) = wc.lexicon {
                         cg = cg.with_lexicon(lex.size, rng);
                     }

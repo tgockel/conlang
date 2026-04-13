@@ -30,13 +30,15 @@ Define them in the `"word_classes"` field of your JSON sketch:
 
 ```json
 {
+  "stress": { "default": "trochaic", "secondary": true },
   "word_classes": {
     "det": {
       "patterns": [
         {"value": "$OV", "weight": 10},
         {"value": "V",   "weight": 5}
       ],
-      "lexicon": { "generate": { "size": 8 } }
+      "lexicon": { "generate": { "size": 8 } },
+      "stress": "none"
     },
     "noun": {
       "patterns": [
@@ -73,12 +75,82 @@ When absent, each word is generated fresh from the patterns.
 The key insight is that natural languages have two broad categories of words:
 
 **Function words** (determiners, prepositions, pronouns, conjunctions) are short, few in number, and extremely frequent.
-Give them simple patterns like `CV` or `V` and small lexicons (5--15 words).
+Give them simple patterns like `CV` or `V`, small lexicons (5--15 words), and `"stress": "none"`.
 
 **Content words** (nouns, verbs, adjectives, adverbs) are longer, more varied, and individually less frequent.
-Give them patterns with codas and multiple syllables, and larger lexicons (40--200 words).
+Give them patterns with codas and multiple syllables, larger lexicons (40--200 words), and let them inherit the
+default stress strategy.
 
-This asymmetry creates the rhythmic alternation that makes sentences feel like language rather than random sound.
+This asymmetry -- combined with stress on content words but not function words -- creates the rhythmic alternation
+that makes sentences feel like language rather than random sound.
+
+## Stress Assignment
+
+Generated words can receive IPA stress marks (ˈ for primary, ˌ for secondary) according to a configurable strategy.
+Stress is assigned after syllable generation, so it works with both fresh generation and lexicon-based sampling.
+
+### Top-Level Configuration
+
+Add a `"stress"` field to your sketch to set the default strategy for all word classes:
+
+```json
+{
+  "stress": {
+    "default": "trochaic",
+    "secondary": true
+  }
+}
+```
+
+`"default"` is the stress strategy applied to every word class that does not override it.
+`"secondary"` enables secondary stress on alternating syllables in words with 3 or more syllables.
+It defaults to `false` when omitted.
+
+### Strategies
+
+| Strategy      | Primary stress position          | Typical languages |
+|:--------------|:---------------------------------|:------------------|
+| `trochaic`    | First syllable                   | English, German   |
+| `iambic`      | Second syllable (first if mono)  | French-ish        |
+| `penultimate` | Second-to-last syllable          | Latin, Spanish    |
+| `final`       | Last syllable                    | French, Turkish   |
+| `none`        | No stress assigned               | Function words    |
+
+Monosyllabic words receive primary stress unless the strategy is `none`.
+
+### Per-Class Overrides
+
+Each word class can override the default strategy with its own `"stress"` field.
+This is how you keep function words unstressed while content words carry stress:
+
+```json
+{
+  "stress": { "default": "trochaic", "secondary": true },
+  "word_classes": {
+    "det":  { "patterns": ["CV"], "stress": "none" },
+    "noun": { "patterns": ["$OV$K", "$OV$K $OV$K"] },
+    "verb": { "patterns": ["$OV$K"], "stress": "penultimate" }
+  }
+}
+```
+
+Here, determiners get no stress, nouns inherit the top-level `trochaic` strategy, and verbs use `penultimate`.
+
+### Secondary Stress
+
+When `"secondary": true` and a word has 3 or more syllables, secondary stress (ˌ) is placed on alternating
+even-indexed syllables that do not already carry primary stress.
+For example, a four-syllable trochaic word: **ˈ**ta.ˌka.ta.ka.
+
+### Without Stress Configuration
+
+When no `"stress"` field is present at either level, no stress is assigned -- words are generated without stress marks.
+
+Note that omitting `"stress"` is distinct from setting `"stress": "none"`.
+Both produce unstressed words, but `"none"` is meaningful as a per-class override: it keeps specific word classes
+unstressed when a top-level default would otherwise give them stress.
+This is common for function words; for example, in English, articles like "a" `/ə/` and "the" `/ðə/` and prepositions
+like "to" `/tu/` and "of" `/ʌv/` carry no stress.
 
 ## Sentence Templates
 
@@ -141,14 +213,25 @@ Putting it all together, here is a minimal sketch with word classes:
 {
   "consonants": "pbtdkgmnŋsʃlr",
   "vowels": "aeiou",
+  "stress": { "default": "trochaic", "secondary": true },
   "sets": {
     "O": ["p", "t", "k", "b", "d", "g", "st", "pl"],
     "K": ["p", "t", "k", "m", "n", "ŋ", "nd", "ks"]
   },
   "word_classes": {
-    "det":  { "patterns": ["CV", "V"], "lexicon": { "generate": { "size": 6 } } },
-    "noun": { "patterns": ["$OV$K", "$OV $OV$K"], "lexicon": { "generate": { "size": 50 } } },
-    "verb": { "patterns": ["$OV$K", "$OV"], "lexicon": { "generate": { "size": 30 } } }
+    "det":  {
+      "patterns": ["CV", "V"],
+      "lexicon": { "generate": { "size": 6 } },
+      "stress": "none"
+    },
+    "noun": {
+      "patterns": ["$OV$K", "$OV $OV$K"],
+      "lexicon": { "generate": { "size": 50 } }
+    },
+    "verb": {
+      "patterns": ["$OV$K", "$OV"],
+      "lexicon": { "generate": { "size": 30 } }
+    }
   },
   "grammar": [
     {"value": "det noun verb det noun", "weight": 20},
@@ -163,5 +246,5 @@ conlang generate-sentences --config sketch.json
 conlang generate-words --config sketch.json --class noun
 ```
 
-The output will have short determiners (`ta`, `o`, `ke`) alternating with longer nouns and verbs (`plokŋ`, `sta.dend`),
-giving each sentence a recognizable shape.
+The output will have short unstressed determiners (`ta`, `o`, `ke`) alternating with stressed nouns and verbs
+(`ˈplokŋ`, `ˈsta.dend`), giving each sentence a recognizable rhythmic shape.

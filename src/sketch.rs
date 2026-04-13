@@ -40,6 +40,27 @@ pub struct SentenceConfig {
     pub words: [u32; 2],
 }
 
+/// Stress assignment strategy for a word class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StressStrategy {
+    Trochaic,
+    Iambic,
+    Penultimate,
+    Final,
+    None,
+}
+
+/// Top-level stress configuration.
+#[derive(Debug, Deserialize)]
+pub struct StressConfig {
+    /// Default stress strategy for all word classes.
+    pub default: StressStrategy,
+    /// Whether to assign secondary stress on 3+ syllable words.
+    #[serde(default)]
+    pub secondary: bool,
+}
+
 /// Configuration for the lexicon.
 #[derive(Debug, Deserialize)]
 pub struct LexiconConfig {
@@ -59,6 +80,7 @@ pub struct LexiconGenerateConfig {
 pub struct WordClassConfig {
     pub patterns: Vec<NamedSetEntry>,
     pub lexicon: Option<LexiconConfig>,
+    pub stress: Option<StressStrategy>,
 }
 
 /// A language sketch loaded from JSON.
@@ -72,6 +94,7 @@ pub struct Sketch {
     pub word_classes: HashMap<String, WordClassConfig>,
     pub sentence: Option<SentenceConfig>,
     pub grammar: Option<Vec<NamedSetEntry>>,
+    pub stress: Option<StressConfig>,
 }
 
 /// Three ways to specify a set of phonemes, matching the documented JSON formats.
@@ -106,6 +129,8 @@ pub struct ResolvedWordClass {
     pub patterns: Vec<String>,
     pub pattern_weights: Option<Vec<u32>>,
     pub lexicon: Option<LexiconGenerateConfig>,
+    pub stress: Option<StressStrategy>,
+    pub secondary_stress: bool,
 }
 
 /// The result of resolving a sketch into domain types.
@@ -118,6 +143,8 @@ pub struct Resolved {
     pub sentence: Option<SentenceConfig>,
     pub grammar: Option<Vec<String>>,
     pub grammar_weights: Option<Vec<u32>>,
+    pub default_stress: Option<StressStrategy>,
+    pub default_secondary: bool,
 }
 
 impl Sketch {
@@ -172,6 +199,10 @@ impl Sketch {
             None => HashMap::new(),
         };
 
+        // Resolve stress configuration.
+        let default_strategy = self.stress.as_ref().map(|s| s.default);
+        let default_secondary = self.stress.as_ref().map_or(false, |s| s.secondary);
+
         // Resolve word classes.
         let mut resolved_classes = HashMap::new();
         for (name, config) in self.word_classes {
@@ -182,12 +213,15 @@ impl Sketch {
             }
             let (patterns, pattern_weights) = resolve_entries(config.patterns);
             let lexicon = config.lexicon.and_then(|l| l.generate);
+            let stress = config.stress.or(default_strategy);
             resolved_classes.insert(
                 name,
                 ResolvedWordClass {
                     patterns,
                     pattern_weights,
                     lexicon,
+                    stress,
+                    secondary_stress: default_secondary,
                 },
             );
         }
@@ -219,6 +253,8 @@ impl Sketch {
             sentence: self.sentence,
             grammar,
             grammar_weights,
+            default_stress: default_strategy,
+            default_secondary,
         })
     }
 }
@@ -718,6 +754,56 @@ mod tests {
             "consonants": "ptk",
             "vowels": "aiu",
             "word_classes": { "noun": { "patterns": [] } }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn stress_config_loads() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "stress": { "default": "trochaic", "secondary": true },
+            "word_classes": { "word": { "patterns": ["CVC"] } }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.default_stress, Some(StressStrategy::Trochaic));
+        assert!(resolved.default_secondary);
+        assert_eq!(resolved.word_classes["word"].stress, Some(StressStrategy::Trochaic));
+        assert!(resolved.word_classes["word"].secondary_stress);
+    }
+
+    #[test]
+    fn stress_per_class_override() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "stress": { "default": "trochaic" },
+            "word_classes": {
+                "noun": { "patterns": ["CVC"] },
+                "det": { "patterns": ["CV"], "stress": "none" }
+            }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.word_classes["noun"].stress, Some(StressStrategy::Trochaic));
+        assert_eq!(resolved.word_classes["det"].stress, Some(StressStrategy::None));
+    }
+
+    #[test]
+    fn stress_absent_defaults_to_none() {
+        let resolved = Sketch::load(MINIMAL).unwrap();
+        assert_eq!(resolved.default_stress, None);
+        assert!(!resolved.default_secondary);
+        assert_eq!(resolved.word_classes["word"].stress, None);
+    }
+
+    #[test]
+    fn stress_invalid_strategy_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "stress": { "default": "oops" },
+            "word_classes": { "word": { "patterns": ["CVC"] } }
         }"#;
         assert!(Sketch::load(json).is_err());
     }

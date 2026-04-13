@@ -7,6 +7,7 @@
     "values": "əɪɛæʌɑiʊɔu",
     "distribution": { "curve": "cosine" }
   },
+  "stress": { "default": "trochaic", "secondary": true },
   "sets": {
     "O": ["n", "t", "s", "ɹ", "d", "l", "k", "m", "p", "f", "b", "h", "ʃ", "g", "j", "θ", "st", "sp", "sk", "tɹ", "pɹ", "pl", "bl", "kl"],
     "K": ["n", "t", "s", "ɹ", "d", "l", "ð", "k", "z", "m", "p", "v", "f", "ŋ", "ʃ", "θ", "nd", "nt", "ns", "ks", "lz", "lk"]
@@ -17,14 +18,16 @@
         {"value": "$OV", "weight": 10},
         {"value": "V",   "weight": 5}
       ],
-      "lexicon": { "generate": { "size": 8 } }
+      "lexicon": { "generate": { "size": 8 } },
+      "stress": "none"
     },
     "pro": {
       "patterns": [
         {"value": "$OV", "weight": 10},
         {"value": "V",   "weight": 5}
       ],
-      "lexicon": { "generate": { "size": 10 } }
+      "lexicon": { "generate": { "size": 10 } },
+      "stress": "none"
     },
     "noun": {
       "patterns": [
@@ -56,7 +59,8 @@
         {"value": "$OV",   "weight": 15},
         {"value": "$OV$K", "weight": 10}
       ],
-      "lexicon": { "generate": { "size": 12 } }
+      "lexicon": { "generate": { "size": 12 } },
+      "stress": "none"
     }
   },
   "grammar": [
