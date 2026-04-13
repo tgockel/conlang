@@ -54,6 +54,13 @@ pub struct LexiconGenerateConfig {
     pub size: usize,
 }
 
+/// Configuration for a single word class.
+#[derive(Debug, Deserialize)]
+pub struct WordClassConfig {
+    pub patterns: Vec<NamedSetEntry>,
+    pub lexicon: Option<LexiconConfig>,
+}
+
 /// A language sketch loaded from JSON.
 #[derive(Debug, Deserialize)]
 pub struct Sketch {
@@ -62,9 +69,9 @@ pub struct Sketch {
     pub non_pulmonics: Option<String>,
     pub others: Option<String>,
     pub sets: Option<HashMap<String, Vec<NamedSetEntry>>>,
-    pub patterns: Vec<NamedSetEntry>,
+    pub word_classes: HashMap<String, WordClassConfig>,
     pub sentence: Option<SentenceConfig>,
-    pub lexicon: Option<LexiconConfig>,
+    pub grammar: Option<Vec<NamedSetEntry>>,
 }
 
 /// Three ways to specify a set of phonemes, matching the documented JSON formats.
@@ -94,16 +101,23 @@ pub struct WeightedPhoneme {
     pub weight: u32,
 }
 
+/// A resolved word class ready for generation.
+pub struct ResolvedWordClass {
+    pub patterns: Vec<String>,
+    pub pattern_weights: Option<Vec<u32>>,
+    pub lexicon: Option<LexiconGenerateConfig>,
+}
+
 /// The result of resolving a sketch into domain types.
 pub struct Resolved {
     pub inventory: phone::Inventory,
     pub consonant_weights: Option<Vec<u32>>,
     pub vowel_weights: Option<Vec<u32>>,
     pub named_sets: HashMap<String, NamedSet>,
-    pub patterns: Vec<String>,
-    pub pattern_weights: Option<Vec<u32>>,
+    pub word_classes: HashMap<String, ResolvedWordClass>,
     pub sentence: Option<SentenceConfig>,
-    pub lexicon: Option<LexiconGenerateConfig>,
+    pub grammar: Option<Vec<String>>,
+    pub grammar_weights: Option<Vec<u32>>,
 }
 
 impl Sketch {
@@ -113,8 +127,10 @@ impl Sketch {
     }
 
     pub fn resolve(self) -> Result<Resolved, SketchError> {
-        if self.patterns.is_empty() {
-            return Err(SketchError::Validation("patterns must not be empty".into()));
+        if self.word_classes.is_empty() {
+            return Err(SketchError::Validation(
+                "word_classes must not be empty".into(),
+            ));
         }
 
         if let Some(ref sc) = self.sentence {
@@ -156,36 +172,53 @@ impl Sketch {
             None => HashMap::new(),
         };
 
-        let has_weights = self
-            .patterns
-            .iter()
-            .any(|e| matches!(e, NamedSetEntry::Weighted { .. }));
-        let mut pattern_strings = Vec::with_capacity(self.patterns.len());
-        let mut pattern_weights_vec = if has_weights {
-            Some(Vec::with_capacity(self.patterns.len()))
-        } else {
-            None
-        };
-        for entry in self.patterns {
-            let (value, weight) = match entry {
-                NamedSetEntry::Simple(s) => (s, 1),
-                NamedSetEntry::Weighted { value, weight } => (value, weight),
-            };
-            pattern_strings.push(value);
-            if let Some(ref mut w) = pattern_weights_vec {
-                w.push(weight);
+        // Resolve word classes.
+        let mut resolved_classes = HashMap::new();
+        for (name, config) in self.word_classes {
+            if config.patterns.is_empty() {
+                return Err(SketchError::Validation(format!(
+                    "word class {name:?} has no patterns"
+                )));
             }
+            let (patterns, pattern_weights) = resolve_entries(config.patterns);
+            let lexicon = config.lexicon.and_then(|l| l.generate);
+            resolved_classes.insert(
+                name,
+                ResolvedWordClass {
+                    patterns,
+                    pattern_weights,
+                    lexicon,
+                },
+            );
         }
+
+        // Resolve grammar templates (optional).
+        let (grammar, grammar_weights) = match self.grammar {
+            Some(gr) => {
+                let (grammar_strings, gw) = resolve_entries(gr);
+                for template in &grammar_strings {
+                    for class_name in template.split_ascii_whitespace() {
+                        if !resolved_classes.contains_key(class_name) {
+                            return Err(SketchError::Validation(format!(
+                                "grammar references unknown word class: {class_name:?}"
+                            )));
+                        }
+                    }
+                }
+                (Some(grammar_strings), gw)
+            }
+            None => (None, None),
+        };
 
         Ok(Resolved {
             inventory,
             consonant_weights,
             vowel_weights,
             named_sets,
-            patterns: pattern_strings,
-            pattern_weights: pattern_weights_vec,
+            word_classes: resolved_classes,
             sentence: self.sentence,
-            lexicon: self.lexicon.and_then(|l| l.generate),
+            grammar,
+            grammar_weights,
         })
     }
 }
@@ -254,6 +287,29 @@ fn resolve_vowel_set(
             Ok((segs, Some(weights)))
         }
     }
+}
+
+fn resolve_entries(entries: Vec<NamedSetEntry>) -> (Vec<String>, Option<Vec<u32>>) {
+    let has_weights = entries
+        .iter()
+        .any(|e| matches!(e, NamedSetEntry::Weighted { .. }));
+    let mut strings = Vec::with_capacity(entries.len());
+    let mut weights = if has_weights {
+        Some(Vec::with_capacity(entries.len()))
+    } else {
+        None
+    };
+    for entry in entries {
+        let (value, weight) = match entry {
+            NamedSetEntry::Simple(s) => (s, 1),
+            NamedSetEntry::Weighted { value, weight } => (value, weight),
+        };
+        strings.push(value);
+        if let Some(ref mut w) = weights {
+            w.push(weight);
+        }
+    }
+    (strings, weights)
 }
 
 fn parse_consonant_string(s: &str) -> Result<Vec<phone::Segment>, phone::ParseError> {
@@ -355,21 +411,21 @@ fn resolve_named_sets(
 mod tests {
     use super::*;
 
+    /// Helper: minimal valid sketch JSON with a single word class.
+    const MINIMAL: &str = r#"{
+        "consonants": "ptk",
+        "vowels": "aiu",
+        "word_classes": { "word": { "patterns": ["CVC"] } }
+    }"#;
+
     #[test]
     fn simple_sketch() {
-        let json = r#"{
-            "consonants": "ptk",
-            "vowels": "aiu",
-            "patterns": ["CVC"]
-        }"#;
-        let resolved = Sketch::load(json).unwrap();
+        let resolved = Sketch::load(MINIMAL).unwrap();
         assert_eq!(resolved.inventory.consonants().len(), 3);
         assert_eq!(resolved.inventory.vowels().len(), 3);
-        let cw = resolved.consonant_weights.unwrap();
-        assert_eq!(cw.len(), 3);
-        let vw = resolved.vowel_weights.unwrap();
-        assert_eq!(vw.len(), 3);
-        assert_eq!(resolved.patterns, vec!["CVC"]);
+        assert_eq!(resolved.consonant_weights.unwrap().len(), 3);
+        assert_eq!(resolved.vowel_weights.unwrap().len(), 3);
+        assert_eq!(resolved.word_classes["word"].patterns, vec!["CVC"]);
     }
 
     #[test]
@@ -380,12 +436,11 @@ mod tests {
                 "distribution": { "curve": "cosine" }
             },
             "vowels": "aiu",
-            "patterns": ["CVC"]
+            "word_classes": { "word": { "patterns": ["CVC"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         let w = resolved.consonant_weights.unwrap();
         assert_eq!(w.len(), 8);
-        // First element should be ~19.5% of total, last ~1.9%
         let total: u32 = w.iter().sum();
         let first_pct = w[0] as f64 / total as f64;
         let last_pct = w[7] as f64 / total as f64;
@@ -402,12 +457,11 @@ mod tests {
                 { "value": "k", "weight": 10 }
             ],
             "vowels": "aiu",
-            "patterns": ["CVC"]
+            "word_classes": { "word": { "patterns": ["CVC"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         assert_eq!(resolved.inventory.consonants().len(), 3);
-        let w = resolved.consonant_weights.unwrap();
-        assert_eq!(w, vec![30, 20, 10]);
+        assert_eq!(resolved.consonant_weights.unwrap(), vec![30, 20, 10]);
     }
 
     #[test]
@@ -418,7 +472,7 @@ mod tests {
                 { "value": "a", "weight": 50 },
                 { "value": "i", "weight": 30 }
             ],
-            "patterns": ["CV"]
+            "word_classes": { "word": { "patterns": ["CV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         assert_eq!(resolved.consonant_weights.unwrap().len(), 3);
@@ -431,19 +485,18 @@ mod tests {
             "consonants": "ptk",
             "vowels": "ai",
             "non_pulmonics": "ɓɗ",
-            "patterns": ["CVC"]
+            "word_classes": { "word": { "patterns": ["CVC"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        // 3 consonants + 2 non-pulmonics
         assert_eq!(resolved.inventory.consonants().len(), 5);
     }
 
     #[test]
-    fn empty_patterns_error() {
+    fn empty_word_classes_error() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": []
+            "word_classes": {}
         }"#;
         assert!(Sketch::load(json).is_err());
     }
@@ -456,16 +509,14 @@ mod tests {
                 "distribution": { "curve": "cosine", "a": 0.2 }
             },
             "vowels": "a",
-            "patterns": ["CV"]
+            "word_classes": { "word": { "patterns": ["CV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         let w = resolved.consonant_weights.unwrap();
         assert_eq!(w.len(), 12);
-        // With a=0.2, the distribution should be less extreme than a=0
         let total: u32 = w.iter().sum();
         let first_pct = w[0] as f64 / total as f64;
         let last_pct = w[11] as f64 / total as f64;
-        // From the documented table: first ~11.9%, last ~2.6%
         assert!((first_pct - 0.119).abs() < 0.01, "first: {first_pct}");
         assert!((last_pct - 0.026).abs() < 0.01, "last: {last_pct}");
     }
@@ -478,11 +529,10 @@ mod tests {
                 { "value": "d͡ʒ", "weight": 10 }
             ],
             "vowels": "a",
-            "patterns": ["CV"]
+            "word_classes": { "word": { "patterns": ["CV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         assert_eq!(resolved.inventory.consonants().len(), 2);
-        // Both should be compound segments
         assert!(resolved.inventory.consonants()[0].manner() == Some(phone::Manner::Affricate));
     }
 
@@ -491,10 +541,8 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "sets": {
-                "O": ["p", "t", "k"]
-            },
-            "patterns": ["$OV"]
+            "sets": { "O": ["p", "t", "k"] },
+            "word_classes": { "word": { "patterns": ["$OV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         let onset = &resolved.named_sets["O"];
@@ -507,15 +555,12 @@ mod tests {
         let json = r#"{
             "consonants": "ptksl",
             "vowels": "a",
-            "sets": {
-                "O": ["p", "st", "pl"]
-            },
-            "patterns": ["$OV"]
+            "sets": { "O": ["p", "st", "pl"] },
+            "word_classes": { "word": { "patterns": ["$OV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         let onset = &resolved.named_sets["O"];
         assert_eq!(onset.choices.len(), 3);
-        // "st" should have 2 segments
         assert_eq!(onset.choices[1].len(), 2);
     }
 
@@ -524,16 +569,13 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "a",
-            "sets": {
-                "O": ["p", {"value": "t", "weight": 5}]
-            },
-            "patterns": ["$OV"]
+            "sets": { "O": ["p", {"value": "t", "weight": 5}] },
+            "word_classes": { "word": { "patterns": ["$OV"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
         let onset = &resolved.named_sets["O"];
         assert_eq!(onset.choices.len(), 2);
-        let w = onset.weights.as_ref().unwrap();
-        assert_eq!(w, &[1, 5]);
+        assert_eq!(onset.weights.as_ref().unwrap(), &[1, 5]);
     }
 
     #[test]
@@ -541,10 +583,8 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "a",
-            "sets": {
-                "O": []
-            },
-            "patterns": ["$OV"]
+            "sets": { "O": [] },
+            "word_classes": { "word": { "patterns": ["$OV"] } }
         }"#;
         assert!(Sketch::load(json).is_err());
     }
@@ -554,22 +594,16 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC"],
+            "word_classes": { "word": { "patterns": ["CVC"] } },
             "sentence": { "words": [3, 8] }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        let sc = resolved.sentence.unwrap();
-        assert_eq!(sc.words, [3, 8]);
+        assert_eq!(resolved.sentence.unwrap().words, [3, 8]);
     }
 
     #[test]
     fn sentence_config_absent() {
-        let json = r#"{
-            "consonants": "ptk",
-            "vowels": "aiu",
-            "patterns": ["CVC"]
-        }"#;
-        let resolved = Sketch::load(json).unwrap();
+        let resolved = Sketch::load(MINIMAL).unwrap();
         assert!(resolved.sentence.is_none());
     }
 
@@ -578,7 +612,7 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC"],
+            "word_classes": { "word": { "patterns": ["CVC"] } },
             "sentence": { "words": [0, 5] }
         }"#;
         assert!(Sketch::load(json).is_err());
@@ -589,72 +623,102 @@ mod tests {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC"],
+            "word_classes": { "word": { "patterns": ["CVC"] } },
             "sentence": { "words": [8, 3] }
         }"#;
         assert!(Sketch::load(json).is_err());
     }
 
     #[test]
-    fn weighted_patterns() {
+    fn weighted_class_patterns() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": [
-                {"value": "CVC", "weight": 40},
-                {"value": "CV", "weight": 10}
+            "word_classes": {
+                "word": { "patterns": [
+                    {"value": "CVC", "weight": 40},
+                    {"value": "CV", "weight": 10}
+                ] }
+            }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let w = &resolved.word_classes["word"];
+        assert_eq!(w.patterns, vec!["CVC", "CV"]);
+        assert_eq!(w.pattern_weights, Some(vec![40, 10]));
+    }
+
+    #[test]
+    fn word_classes_and_grammar() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": {
+                "det": { "patterns": ["CV"] },
+                "noun": { "patterns": [{"value": "CVC", "weight": 10}, {"value": "CV CVC", "weight": 5}] }
+            },
+            "grammar": [
+                {"value": "det noun", "weight": 20},
+                {"value": "noun", "weight": 10}
             ]
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
-        assert_eq!(resolved.pattern_weights, Some(vec![40, 10]));
+        assert_eq!(resolved.word_classes.len(), 2);
+        let noun = &resolved.word_classes["noun"];
+        assert_eq!(noun.patterns, vec!["CVC", "CV CVC"]);
+        assert_eq!(noun.pattern_weights, Some(vec![10, 5]));
+        let det = &resolved.word_classes["det"];
+        assert_eq!(det.patterns, vec!["CV"]);
+        assert!(det.pattern_weights.is_none());
+        let gr = resolved.grammar.unwrap();
+        assert_eq!(gr, vec!["det noun", "noun"]);
+        assert_eq!(resolved.grammar_weights, Some(vec![20, 10]));
     }
 
     #[test]
-    fn mixed_patterns_plain_and_weighted() {
+    fn word_classes_with_lexicon() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC", {"value": "CV", "weight": 5}]
+            "word_classes": {
+                "noun": {
+                    "patterns": ["CVC"],
+                    "lexicon": { "generate": { "size": 50 } }
+                }
+            }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
-        assert_eq!(resolved.pattern_weights, Some(vec![1, 5]));
+        assert_eq!(resolved.word_classes["noun"].lexicon.as_ref().unwrap().size, 50);
     }
 
     #[test]
-    fn plain_patterns_no_weights() {
+    fn word_classes_without_grammar_ok() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC", "CV"]
+            "word_classes": { "word": { "patterns": ["CVC"] } }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert_eq!(resolved.patterns, vec!["CVC", "CV"]);
-        assert!(resolved.pattern_weights.is_none());
+        assert!(resolved.grammar.is_none());
     }
 
     #[test]
-    fn lexicon_config_loads() {
+    fn grammar_references_unknown_class_error() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC"],
-            "lexicon": { "generate": { "size": 100 } }
+            "word_classes": { "noun": { "patterns": ["CVC"] } },
+            "grammar": ["det noun"]
         }"#;
-        let resolved = Sketch::load(json).unwrap();
-        let lex = resolved.lexicon.unwrap();
-        assert_eq!(lex.size, 100);
+        assert!(Sketch::load(json).is_err());
     }
 
     #[test]
-    fn lexicon_config_absent() {
+    fn word_class_empty_patterns_error() {
         let json = r#"{
             "consonants": "ptk",
             "vowels": "aiu",
-            "patterns": ["CVC"]
+            "word_classes": { "noun": { "patterns": [] } }
         }"#;
-        let resolved = Sketch::load(json).unwrap();
-        assert!(resolved.lexicon.is_none());
+        assert!(Sketch::load(json).is_err());
     }
 }

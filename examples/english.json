@@ -11,22 +11,62 @@
     "O": ["n", "t", "s", "ɹ", "d", "l", "k", "m", "p", "f", "b", "h", "ʃ", "g", "j", "θ", "st", "sp", "sk", "tɹ", "pɹ", "pl", "bl", "kl"],
     "K": ["n", "t", "s", "ɹ", "d", "l", "ð", "k", "z", "m", "p", "v", "f", "ŋ", "ʃ", "θ", "nd", "nt", "ns", "ks", "lz", "lk"]
   },
-  "patterns": [
-    {"value": "V",               "weight": 5},
-    {"value": "$OV",             "weight": 20},
-    {"value": "V$K",             "weight": 8},
-    {"value": "$OV$K",           "weight": 30},
-
-    {"value": "$OV $OV",         "weight": 4},
-    {"value": "$OV$K $OV",       "weight": 6},
-    {"value": "$OV $OV$K",       "weight": 4},
-    {"value": "V$K $OV",         "weight": 2},
-    {"value": "$OV$K $OV$K",     "weight": 5},
-
-    {"value": "$OV $OV $OV",     "weight": 2},
-    {"value": "$OV$K $OV $OV",   "weight": 2},
-    {"value": "$OV $OV $OV$K",   "weight": 2},
-    {"value": "$OV$K $OV $OV$K", "weight": 2}
-  ],
-  "lexicon": { "generate": { "size": 200 } }
+  "word_classes": {
+    "det": {
+      "patterns": [
+        {"value": "$OV", "weight": 10},
+        {"value": "V",   "weight": 5}
+      ],
+      "lexicon": { "generate": { "size": 8 } }
+    },
+    "pro": {
+      "patterns": [
+        {"value": "$OV", "weight": 10},
+        {"value": "V",   "weight": 5}
+      ],
+      "lexicon": { "generate": { "size": 10 } }
+    },
+    "noun": {
+      "patterns": [
+        {"value": "$OV$K",           "weight": 30},
+        {"value": "$OV$K $OV",       "weight": 6},
+        {"value": "$OV $OV$K",       "weight": 4},
+        {"value": "$OV$K $OV$K",     "weight": 3}
+      ],
+      "lexicon": { "generate": { "size": 120 } }
+    },
+    "verb": {
+      "patterns": [
+        {"value": "$OV$K",       "weight": 25},
+        {"value": "$OV",         "weight": 15},
+        {"value": "$OV$K $OV",   "weight": 5}
+      ],
+      "lexicon": { "generate": { "size": 80 } }
+    },
+    "adj": {
+      "patterns": [
+        {"value": "$OV$K",       "weight": 20},
+        {"value": "$OV $OV",     "weight": 5},
+        {"value": "$OV $OV$K",   "weight": 5}
+      ],
+      "lexicon": { "generate": { "size": 40 } }
+    },
+    "prep": {
+      "patterns": [
+        {"value": "$OV",   "weight": 15},
+        {"value": "$OV$K", "weight": 10}
+      ],
+      "lexicon": { "generate": { "size": 12 } }
+    }
+  },
+  "grammar": [
+    {"value": "det noun verb det noun",          "weight": 20},
+    {"value": "det noun verb",                   "weight": 15},
+    {"value": "pro verb det noun",               "weight": 12},
+    {"value": "noun verb prep det noun",         "weight": 10},
+    {"value": "det adj noun verb det noun",      "weight": 8},
+    {"value": "det noun verb det adj noun",      "weight": 8},
+    {"value": "pro verb prep det noun",          "weight": 5},
+    {"value": "det noun verb adj",               "weight": 5}
+  ]
 }

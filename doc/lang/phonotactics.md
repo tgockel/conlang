@@ -73,27 +73,27 @@ Brackets work inside parentheses:
 A simple CV language:
 
 ```sh
-conlang generate-syllables --consonants ptkmnsl --vowels aeiou --pattern "CV"
+conlang generate-words --consonants ptkmnsl --vowels aeiou --pattern "CV"
 ```
 
 A language with CVC syllables and optional onsets:
 
 ```sh
-conlang generate-syllables --consonants ptkbdgmnŋsʃlr --vowels aeiou \
+conlang generate-words --consonants ptkbdgmnŋsʃlr --vowels aeiou \
     --pattern "(C)VC"
 ```
 
 Two-syllable words with specific initial consonants:
 
 ```sh
-conlang generate-syllables --consonants ptkbdgmnŋsʃlr --vowels aeiou \
+conlang generate-words --consonants ptkbdgmnŋsʃlr --vowels aeiou \
     --pattern "[ptkbdg]VC CV"
 ```
 
 Nasal-only codas with optional fricative onsets:
 
 ```sh
-conlang generate-syllables --consonants ptkbdgmnŋsʃfvlr --vowels aeiou \
+conlang generate-words --consonants ptkbdgmnŋsʃfvlr --vowels aeiou \
     --pattern "(X)VN"
 ```
 
@@ -118,9 +118,16 @@ Each key is a set name (referenced as `$<name>` in patterns), and each value is 
     "K": ["p", "t", "k", "m", "n", "ŋ", "nd", "ks"],
     "longer": ["ŋ", "d", "b"]
   },
-  "patterns": ["$OV$K", "$OV", "V$K", "V${longer}"]
+  "word_classes": {
+    "word": {
+      "patterns": ["$OV$K", "$OV", "V$K", "V${longer}"]
+    }
+  }
 }
 ```
+
+> The `"word_classes"` supports different types of words.
+> When you get to [grammar](./grammar.md), you will see how these are used.
 
 Each entry in the array can be:
 

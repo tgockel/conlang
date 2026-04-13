@@ -1,5 +1,9 @@
 {
   "consonants": "pbtdkg",
   "vowels": "aeiou",
-  "patterns": ["CVC", "(C)VC", "CV"]
+  "word_classes": {
+    "word": {
+      "patterns": ["CVC", "(C)VC", "CV"]
+    }
+  }
 }

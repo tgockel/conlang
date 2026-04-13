@@ -8,5 +8,9 @@
     { "value": "i", "weight": 30 },
     { "value": "u", "weight": 10 }
   ],
-  "patterns": ["CVC", "(C)VC CV"]
+  "word_classes": {
+    "word": {
+      "patterns": ["CVC", "(C)VC CV"]
+    }
+  }
 }

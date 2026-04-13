@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::collections::HashMap;
 
 use conlang::{generate, phone, sketch};
+use rand::Rng;
 
 #[cfg(feature = "pronounce")]
 mod speak;
@@ -14,7 +15,7 @@ use speak::SpeakerBox;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 enum Command {
-    GenerateSyllables(GenerateSyllablesCmd),
+    GenerateWords(GenerateWordsCmd),
     GenerateSentences(GenerateSentencesCmd),
 }
 
@@ -89,10 +90,10 @@ struct ResolvedArgs {
     inventory: phone::Inventory,
     weights: Option<generate::InventoryWeights>,
     named_sets: HashMap<String, sketch::NamedSet>,
-    pattern_strings: Vec<String>,
-    pattern_weights: Option<Vec<u32>>,
     sentence_config: Option<[u32; 2]>,
-    lexicon_size: Option<usize>,
+    word_classes: HashMap<String, sketch::ResolvedWordClass>,
+    grammar: Option<Vec<String>>,
+    grammar_weights: Option<Vec<u32>>,
 }
 
 impl PhonemeArgs {
@@ -109,10 +110,10 @@ impl PhonemeArgs {
                 inventory: resolved.inventory,
                 weights: Some(weights),
                 named_sets: resolved.named_sets,
-                pattern_strings: resolved.patterns,
-                pattern_weights: resolved.pattern_weights,
                 sentence_config: resolved.sentence.map(|sc| sc.words),
-                lexicon_size: resolved.lexicon.map(|l| l.size),
+                word_classes: resolved.word_classes,
+                grammar: resolved.grammar,
+                grammar_weights: resolved.grammar_weights,
             })
         } else {
             let inventory = phone::Inventory::from_base_phones(
@@ -136,14 +137,24 @@ impl PhonemeArgs {
                     0.0,
                 )),
             };
+            // Wrap CLI --pattern args into a single word class named "word".
+            let mut word_classes = HashMap::new();
+            word_classes.insert(
+                "word".to_string(),
+                sketch::ResolvedWordClass {
+                    patterns: self.pattern,
+                    pattern_weights: None,
+                    lexicon: None,
+                },
+            );
             Ok(ResolvedArgs {
                 inventory,
                 weights: Some(weights),
                 named_sets: HashMap::new(),
-                pattern_strings: self.pattern,
-                pattern_weights: None,
                 sentence_config: None,
-                lexicon_size: None,
+                word_classes,
+                grammar: None,
+                grammar_weights: None,
             })
         }
     }
@@ -167,9 +178,13 @@ fn parse_patterns(
 }
 
 #[derive(Parser, Debug)]
-struct GenerateSyllablesCmd {
+struct GenerateWordsCmd {
     #[command(flatten)]
     phonemes: PhonemeArgs,
+
+    /// Only generate words from this word class.
+    #[arg(long)]
+    pub class: Option<String>,
 
     /// Speak the generated phrases.
     #[arg(long)]
@@ -194,8 +209,17 @@ struct GenerateSentencesCmd {
 async fn main() -> anyhow::Result<()> {
     let cmd = Command::parse();
     match cmd {
-        Command::GenerateSyllables(cmd) => {
+        Command::GenerateWords(cmd) => {
             let resolved = cmd.phonemes.resolve()?;
+
+            if let Some(ref class_name) = cmd.class {
+                if !resolved.word_classes.contains_key(class_name) {
+                    let available: Vec<_> = resolved.word_classes.keys().collect();
+                    anyhow::bail!(
+                        "unknown word class \"{class_name}\"; available classes: {available:?}"
+                    );
+                }
+            }
 
             #[cfg(feature = "pronounce")]
             let speaker = if cmd.speak {
@@ -215,16 +239,29 @@ async fn main() -> anyhow::Result<()> {
                 weights: resolved.weights.as_ref(),
                 named_sets: &resolved.named_sets,
             };
-            let patterns = parse_patterns(&resolved.pattern_strings, &ctx);
 
             let mut rng = rand::rng();
-            use rand::RngExt;
-            for idx in rand::rng()
-                .sample_iter(rand::distr::Uniform::new(0, patterns.len()).unwrap())
-                .take(100)
-            {
-                let pattern = &patterns[idx];
-                let word = pattern.generate(&mut rng);
+
+            // Build class generators for the requested class(es).
+            let class_generators: Vec<generate::ClassGenerator> = resolved
+                .word_classes
+                .into_iter()
+                .filter(|(name, _)| {
+                    cmd.class.as_ref().is_none_or(|c| c == name)
+                })
+                .map(|(_, wc)| {
+                    let patterns = parse_patterns(&wc.patterns, &ctx);
+                    let mut cg = generate::ClassGenerator::new(patterns, wc.pattern_weights);
+                    if let Some(lex) = wc.lexicon {
+                        cg = cg.with_lexicon(lex.size, &mut rng);
+                    }
+                    cg
+                })
+                .collect();
+
+            for _ in 0..100 {
+                let class_idx = rng.next_u64() as usize % class_generators.len();
+                let (_, word) = class_generators[class_idx].generate(None, &mut rng);
                 let ipa = generate::format_word(&word);
                 println!("{ipa}");
 
@@ -260,27 +297,62 @@ async fn main() -> anyhow::Result<()> {
                 weights: resolved.weights.as_ref(),
                 named_sets: &resolved.named_sets,
             };
-            let patterns = parse_patterns(&resolved.pattern_strings, &ctx);
 
             let mut rng = rand::rng();
-            let [min, max] = word_range;
-            let pw = resolved.pattern_weights.as_deref();
-            let sg = generate::SentenceGenerator::new(&patterns, pw, min, max);
-            let sg = if let Some(size) = resolved.lexicon_size {
-                sg.with_lexicon(size, &mut rng)
-            } else {
-                sg
-            };
-            for _ in 0..100 {
-                let sentence = sg.generate(&mut rng);
-                let ipa = generate::format_sentence(&sentence);
-                println!("{ipa}");
 
-                #[cfg(feature = "pronounce")]
-                if let Some(speaker) = speaker.as_ref() {
-                    speaker.speak(&ipa).await.unwrap();
-                }
+            macro_rules! output_loop {
+                ($gen:expr) => {
+                    for _ in 0..100 {
+                        let sentence = $gen;
+                        let ipa = generate::format_sentence(&sentence);
+                        println!("{ipa}");
+
+                        #[cfg(feature = "pronounce")]
+                        if let Some(speaker) = speaker.as_ref() {
+                            speaker.speak(&ipa).await.unwrap();
+                        }
+                    }
+                };
             }
+
+            // Helper: build ClassGenerator instances from resolved word classes.
+            let build_classes = |word_classes: HashMap<String, sketch::ResolvedWordClass>,
+                                 ctx: &generate::ParseContext,
+                                 rng: &mut rand::rngs::ThreadRng| {
+                let mut classes = HashMap::new();
+                for (name, wc) in word_classes {
+                    let patterns = parse_patterns(&wc.patterns, ctx);
+                    let mut cg = generate::ClassGenerator::new(patterns, wc.pattern_weights);
+                    if let Some(lex) = wc.lexicon {
+                        cg = cg.with_lexicon(lex.size, rng);
+                    }
+                    classes.insert(name, cg);
+                }
+                classes
+            };
+
+            if let Some(grammar) = resolved.grammar {
+                let classes = build_classes(resolved.word_classes, &ctx, &mut rng);
+                let templates: Vec<Vec<String>> = grammar
+                    .iter()
+                    .map(|t| t.split_ascii_whitespace().map(String::from).collect())
+                    .collect();
+                let tsg = generate::TemplatedSentenceGenerator::new(
+                    classes,
+                    templates,
+                    resolved.grammar_weights,
+                );
+                output_loop!(tsg.generate(&mut rng));
+            } else {
+                let classes = build_classes(resolved.word_classes, &ctx, &mut rng);
+                let class_list: Vec<generate::ClassGenerator> =
+                    classes.into_values().collect();
+                let [min, max] = word_range;
+                let sg =
+                    generate::UnstructuredSentenceGenerator::new(class_list, min, max);
+                output_loop!(sg.generate(&mut rng));
+            }
+
             Ok(())
         }
     }
