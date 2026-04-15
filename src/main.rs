@@ -7,10 +7,8 @@ use std::collections::HashMap;
 use conlang::{generate, phone, sketch};
 use rand::Rng;
 
-#[cfg(feature = "pronounce")]
-mod speak;
-#[cfg(feature = "pronounce")]
-use speak::SpeakerBox;
+#[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+use conlang::voice;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -223,16 +221,19 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            #[cfg(feature = "pronounce")]
-            let speaker = if cmd.speak {
-                Some(SpeakerBox::new().await.unwrap())
+            #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+            let speaker: Option<(voice::AudioSink, Box<dyn voice::Voice>)> = if cmd.speak {
+                let sink = voice::AudioSink::new()?;
+                let driver = voice::create_default_driver().await?;
+                Some((sink, driver))
             } else {
                 None
             };
-            #[cfg(not(feature = "pronounce"))]
+            #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
             if cmd.speak {
                 anyhow::bail!(
-                    "speak command specified, but this has not been compiled with `pronounce`"
+                    "speak command specified, but no voice driver was compiled in \
+                     (enable the voice-polly or voice-espeak feature)"
                 );
             }
 
@@ -272,9 +273,9 @@ async fn main() -> anyhow::Result<()> {
                 let ipa = generate::format_word(&word);
                 println!("{ipa}");
 
-                #[cfg(feature = "pronounce")]
-                if let Some(speaker) = speaker.as_ref() {
-                    speaker.speak(&ipa).await.unwrap();
+                #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+                if let Some((ref sink, ref driver)) = speaker {
+                    driver.speak(&ipa, sink)?;
                 }
             }
             Ok(())
@@ -286,16 +287,19 @@ async fn main() -> anyhow::Result<()> {
                 .or(resolved.sentence_config)
                 .unwrap_or([3, 8]);
 
-            #[cfg(feature = "pronounce")]
-            let speaker = if cmd.speak {
-                Some(SpeakerBox::new().await.unwrap())
+            #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+            let speaker: Option<(voice::AudioSink, Box<dyn voice::Voice>)> = if cmd.speak {
+                let sink = voice::AudioSink::new()?;
+                let driver = voice::create_default_driver().await?;
+                Some((sink, driver))
             } else {
                 None
             };
-            #[cfg(not(feature = "pronounce"))]
+            #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
             if cmd.speak {
                 anyhow::bail!(
-                    "speak command specified, but this has not been compiled with `pronounce`"
+                    "speak command specified, but no voice driver was compiled in \
+                     (enable the voice-polly or voice-espeak feature)"
                 );
             }
 
@@ -314,9 +318,9 @@ async fn main() -> anyhow::Result<()> {
                         let ipa = generate::format_sentence(&sentence);
                         println!("{ipa}");
 
-                        #[cfg(feature = "pronounce")]
-                        if let Some(speaker) = speaker.as_ref() {
-                            speaker.speak(&ipa).await.unwrap();
+                        #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+                        if let Some((ref sink, ref driver)) = speaker {
+                            driver.speak(&ipa, sink)?;
                         }
                     }
                 };
