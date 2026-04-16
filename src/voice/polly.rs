@@ -22,6 +22,16 @@ impl PollyVoice {
             engine,
         })
     }
+
+    pub async fn from_config(config: &super::config::PollyConfig) -> Result<Self, anyhow::Error> {
+        let voice_id = aws_sdk_polly::types::VoiceId::from(
+            config.voice_id.as_deref().unwrap_or("Joanna"),
+        );
+        let engine = aws_sdk_polly::types::Engine::from(
+            config.engine.as_deref().unwrap_or("neural"),
+        );
+        Self::new(voice_id, engine).await
+    }
 }
 
 impl Voice for PollyVoice {

@@ -4,6 +4,7 @@
 //! Audio playback is handled by the shared [`AudioSink`], which drivers receive
 //! by reference so callers can reuse a single sink across multiple drivers.
 
+pub mod config;
 #[cfg(feature = "voice-espeak")]
 pub mod espeak;
 #[cfg(feature = "voice-polly")]

@@ -46,15 +46,6 @@ fn ensure_init() -> Result<u32, anyhow::Error> {
         espeakng_sys::espeak_SetSynthCallback(Some(espeak_callback));
     }
 
-    // Slow down from 175 wpm default to 120 wpm for clearer phoneme listening.
-    unsafe {
-        espeakng_sys::espeak_SetParameter(
-            espeakng_sys::espeak_PARAMETER_espeakRATE,
-            120,
-            0,
-        );
-    }
-
     let rate = sample_rate as u32;
     *guard = Some(rate);
     Ok(rate)
@@ -250,6 +241,9 @@ fn ipa_to_espeak_phonemes(ipa: &str) -> String {
 pub struct EspeakVoice {
     voice: String,
     sample_rate: u32,
+    rate: Option<i32>,
+    pitch: Option<i32>,
+    volume: Option<i32>,
 }
 
 impl EspeakVoice {
@@ -259,13 +253,56 @@ impl EspeakVoice {
         Ok(Self {
             voice: voice.to_string(),
             sample_rate,
+            rate: Some(120),
+            pitch: None,
+            volume: None,
         })
+    }
+
+    pub fn from_config(config: &super::config::EspeakConfig) -> Result<Self, anyhow::Error> {
+        let voice_name = config.voice.as_deref().unwrap_or("en");
+        let sample_rate = ensure_init()?;
+        set_voice(voice_name)?;
+        Ok(Self {
+            voice: voice_name.to_string(),
+            sample_rate,
+            rate: config.rate,
+            pitch: config.pitch,
+            volume: config.volume,
+        })
+    }
+
+    fn apply_parameters(&self) {
+        unsafe {
+            if let Some(rate) = self.rate {
+                espeakng_sys::espeak_SetParameter(
+                    espeakng_sys::espeak_PARAMETER_espeakRATE,
+                    rate,
+                    0,
+                );
+            }
+            if let Some(pitch) = self.pitch {
+                espeakng_sys::espeak_SetParameter(
+                    espeakng_sys::espeak_PARAMETER_espeakPITCH,
+                    pitch,
+                    0,
+                );
+            }
+            if let Some(volume) = self.volume {
+                espeakng_sys::espeak_SetParameter(
+                    espeakng_sys::espeak_PARAMETER_espeakVOLUME,
+                    volume,
+                    0,
+                );
+            }
+        }
     }
 }
 
 impl Voice for EspeakVoice {
     fn speak(&self, ipa: &str, sink: &AudioSink) -> Result<(), anyhow::Error> {
         set_voice(&self.voice)?;
+        self.apply_parameters();
         let phonemes = ipa_to_espeak_phonemes(ipa);
         let samples = synthesize(&phonemes)?;
         sink.play_pcm(&samples, self.sample_rate)
