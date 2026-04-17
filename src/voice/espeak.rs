@@ -237,6 +237,148 @@ fn ipa_to_espeak_phonemes(ipa: &str) -> String {
     out
 }
 
+/// Information about an installed eSpeak voice, returned by [`list_voices`].
+pub struct EspeakVoiceInfo {
+    /// Short name usable as a voice config value (e.g., "en", "mb-de5").
+    pub name: String,
+    /// Human-readable language or voice name.
+    pub language: String,
+    /// Internal eSpeak identifier path.
+    pub identifier: String,
+    /// For MBROLA voices, whether the required data files are installed.
+    pub data_installed: bool,
+}
+
+/// Get the eSpeak-ng data directory path.
+fn data_path() -> Result<std::path::PathBuf, anyhow::Error> {
+    ensure_init()?;
+    unsafe {
+        let mut path_ptr: *const std::os::raw::c_char = std::ptr::null();
+        espeakng_sys::espeak_Info(&mut path_ptr);
+        if path_ptr.is_null() {
+            anyhow::bail!("espeak_Info returned null data path");
+        }
+        let path = std::ffi::CStr::from_ptr(path_ptr)
+            .to_string_lossy()
+            .into_owned();
+        Ok(std::path::PathBuf::from(path))
+    }
+}
+
+/// Enumerate all voices known to eSpeak-ng (including MBROLA voices).
+///
+/// Standard voices come from `espeak_ListVoices`. MBROLA voices are discovered
+/// by scanning the `voices/mb/` directory under the eSpeak data path, since the
+/// API does not include them in its listing.
+pub fn list_voices() -> Result<Vec<EspeakVoiceInfo>, anyhow::Error> {
+    ensure_init()?;
+
+    let mut voices = Vec::new();
+
+    // Standard voices from the API.
+    unsafe {
+        let voice_list = espeakng_sys::espeak_ListVoices(std::ptr::null_mut());
+        if !voice_list.is_null() {
+            let mut ptr = voice_list;
+            while !(*ptr).is_null() {
+                let v = &**ptr;
+                let name = if v.name.is_null() {
+                    String::new()
+                } else {
+                    std::ffi::CStr::from_ptr(v.name)
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                let identifier = if v.identifier.is_null() {
+                    String::new()
+                } else {
+                    std::ffi::CStr::from_ptr(v.identifier)
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                // The languages field uses a special encoding: a priority byte
+                // followed by a null-terminated language code string.
+                let language = if v.languages.is_null() {
+                    String::new()
+                } else {
+                    let lang_ptr = v.languages.add(1);
+                    std::ffi::CStr::from_ptr(lang_ptr)
+                        .to_string_lossy()
+                        .into_owned()
+                };
+
+                let short_name = identifier
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&identifier)
+                    .to_string();
+
+                voices.push(EspeakVoiceInfo {
+                    name: short_name,
+                    language: if name.is_empty() { language } else { name },
+                    identifier,
+                    data_installed: true,
+                });
+
+                ptr = ptr.add(1);
+            }
+        }
+    }
+
+    // MBROLA voices from the filesystem (not returned by espeak_ListVoices).
+    if let Ok(data_dir) = data_path() {
+        let mb_dir = data_dir.join("voices").join("mb");
+        if let Ok(entries) = std::fs::read_dir(&mb_dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name().to_string_lossy().into_owned();
+                if !file_name.starts_with("mb-") {
+                    continue;
+                }
+                let data_installed = check_mbrola_data(&file_name);
+                voices.push(EspeakVoiceInfo {
+                    name: file_name.clone(),
+                    language: read_mbrola_language(&entry.path()),
+                    identifier: format!("mb/{file_name}"),
+                    data_installed,
+                });
+            }
+        }
+    }
+
+    Ok(voices)
+}
+
+/// Read the language from an MBROLA voice definition file.
+///
+/// MBROLA voice files contain lines like `language de 7`. We extract the
+/// language code from the first `language` directive.
+fn read_mbrola_language(path: &std::path::Path) -> String {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    for line in contents.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("language") {
+            if let Some(lang) = rest.split_whitespace().next() {
+                return lang.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Check if MBROLA data is installed for a given voice name (e.g., "mb-de5").
+fn check_mbrola_data(name: &str) -> bool {
+    let data_name = name.strip_prefix("mb-").unwrap_or(name);
+    let candidates = [
+        format!("/usr/share/mbrola/{data_name}/{data_name}"),
+        format!("/usr/share/mbrola/voices/{data_name}"),
+    ];
+    candidates
+        .iter()
+        .any(|p| std::path::Path::new(p).exists())
+}
+
 /// A voice driver backed by eSpeak-ng.
 pub struct EspeakVoice {
     voice: String,

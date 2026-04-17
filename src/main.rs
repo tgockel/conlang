@@ -5,7 +5,7 @@ use std::fmt::Write;
 use std::collections::HashMap;
 
 use conlang::{generate, phone, sketch};
-use rand::Rng;
+use rand::RngExt;
 
 #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
 use conlang::voice;
@@ -15,6 +15,7 @@ use conlang::voice;
 enum Command {
     GenerateWords(GenerateWordsCmd),
     GenerateSentences(GenerateSentencesCmd),
+    Config(ConfigCmd),
 }
 
 fn parse_all<T>(src: &str) -> Result<Vec<T>, anyhow::Error>
@@ -63,7 +64,6 @@ fn parse_word_range(src: &str) -> Result<[u32; 2], String> {
     }
 }
 
-/// Shared phoneme/config arguments used by both generate commands.
 #[derive(Parser, Debug)]
 struct PhonemeArgs {
     /// Path to a JSON language sketch file.
@@ -177,6 +177,105 @@ fn parse_patterns(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Voice-related CLI types
+// ---------------------------------------------------------------------------
+
+#[derive(Parser, Debug)]
+struct VoiceArgs {
+    /// Speak with a configured voice by name, or "default" for the default voice.
+    #[arg(long)]
+    pub speak_with: Option<String>,
+
+    /// Speak each generated item with a random voice from the config.
+    #[arg(long, conflicts_with = "speak_with")]
+    pub speak: bool,
+
+    /// Path to a voices.json configuration file.
+    #[arg(long)]
+    pub voice_config: Option<std::path::PathBuf>,
+}
+
+#[allow(dead_code)]
+enum SpeechMode {
+    Silent,
+    Named(String),
+    Random,
+}
+
+impl VoiceArgs {
+    fn speech_mode(&self) -> SpeechMode {
+        if self.speak {
+            SpeechMode::Random
+        } else if let Some(ref name) = self.speak_with {
+            SpeechMode::Named(name.clone())
+        } else {
+            SpeechMode::Silent
+        }
+    }
+}
+
+#[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+enum Speaker {
+    Single {
+        sink: voice::AudioSink,
+        driver: Box<dyn voice::Voice>,
+    },
+    Random {
+        sink: voice::AudioSink,
+        drivers: Vec<(String, Box<dyn voice::Voice>)>,
+    },
+}
+
+#[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+impl Speaker {
+    fn speak(&self, ipa: &str, rng: &mut impl rand::Rng) -> Result<(), anyhow::Error> {
+        match self {
+            Speaker::Single { sink, driver } => driver.speak(ipa, sink),
+            Speaker::Random { sink, drivers } => {
+                let idx = rng.random_range(0..drivers.len());
+                drivers[idx].1.speak(ipa, sink)
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+async fn build_speaker(voice_args: &VoiceArgs) -> anyhow::Result<Option<Speaker>> {
+    match voice_args.speech_mode() {
+        SpeechMode::Silent => Ok(None),
+        SpeechMode::Named(ref name) => {
+            let config = voice::config::load_voice_config(
+                voice_args.voice_config.as_deref(),
+            )?;
+            let voice_name = if name == "default" {
+                None
+            } else {
+                Some(name.as_str())
+            };
+            let entry = config.resolve(voice_name)?;
+            let sink = voice::AudioSink::new()?;
+            let driver = entry.create_driver().await?;
+            Ok(Some(Speaker::Single { sink, driver }))
+        }
+        SpeechMode::Random => {
+            let config = voice::config::load_voice_config(
+                voice_args.voice_config.as_deref(),
+            )?;
+            if config.voices.is_empty() {
+                anyhow::bail!("--speak requires at least one voice in the config file");
+            }
+            let sink = voice::AudioSink::new()?;
+            let drivers = config.create_all_drivers().await?;
+            Ok(Some(Speaker::Random { sink, drivers }))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generation commands
+// ---------------------------------------------------------------------------
+
 #[derive(Parser, Debug)]
 struct GenerateWordsCmd {
     #[command(flatten)]
@@ -186,9 +285,8 @@ struct GenerateWordsCmd {
     #[arg(long)]
     pub class: Option<String>,
 
-    /// Speak the generated phrases.
-    #[arg(long)]
-    pub speak: bool,
+    #[command(flatten)]
+    pub voice: VoiceArgs,
 }
 
 #[derive(Parser, Debug)]
@@ -200,10 +298,212 @@ struct GenerateSentencesCmd {
     #[arg(long, value_parser = parse_word_range)]
     pub words: Option<[u32; 2]>,
 
-    /// Speak the generated phrases.
-    #[arg(long)]
-    pub speak: bool,
+    #[command(flatten)]
+    pub voice: VoiceArgs,
 }
+
+// ---------------------------------------------------------------------------
+// Config subcommand tree
+// ---------------------------------------------------------------------------
+
+#[derive(Parser, Debug)]
+struct ConfigCmd {
+    #[command(subcommand)]
+    sub: ConfigSubcommand,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum ConfigSubcommand {
+    Voice(VoiceConfigCmd),
+}
+
+#[derive(Parser, Debug)]
+struct VoiceConfigCmd {
+    #[command(subcommand)]
+    sub: VoiceSubcommand,
+
+    /// Path to a voices.json configuration file.
+    #[arg(long)]
+    pub voice_config: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum VoiceSubcommand {
+    /// List configured voices from the voice config file.
+    List,
+    /// Discover available TTS drivers and voices on this system.
+    Scan,
+    /// Speak a test phrase with a configured voice.
+    Test(VoiceTestCmd),
+}
+
+#[derive(Parser, Debug)]
+struct VoiceTestCmd {
+    /// Name of the configured voice to test.
+    pub name: String,
+    /// IPA text to speak. If omitted, uses a built-in test phrase.
+    pub ipa: Option<String>,
+}
+
+#[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+const TEST_PHRASE: &str = "ˈpa.ta ˈka.ba ˈda.ɡa ˈsa.ʃa ˈma.na";
+
+// ---------------------------------------------------------------------------
+// Config voice handlers
+// ---------------------------------------------------------------------------
+
+async fn cmd_voice_list(_config_path: Option<&std::path::Path>) -> anyhow::Result<()> {
+    #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+    {
+        match voice::config::try_load_voice_config(_config_path)? {
+            Some(config) => {
+                println!("Configured voices:");
+                let mut entries: Vec<_> = config.voices.iter().collect();
+                entries.sort_by_key(|(name, _)| name.as_str());
+                for (name, entry) in &entries {
+                    let (driver, description) = match entry {
+                        voice::config::VoiceEntry::Polly(p) => (
+                            "polly",
+                            format!(
+                                "{} ({})",
+                                p.voice_id.as_deref().unwrap_or("Joanna"),
+                                p.engine.as_deref().unwrap_or("neural"),
+                            ),
+                        ),
+                        voice::config::VoiceEntry::Espeak(e) => {
+                            let voice_name = e.voice.as_deref().unwrap_or("en");
+                            let mut desc = voice_name.to_string();
+                            if let Some(rate) = e.rate {
+                                write!(desc, " (rate: {rate})")?;
+                            }
+                            ("espeak", desc)
+                        }
+                    };
+                    println!("  {name:<18} {driver:<8} {description}");
+                }
+                if let Some(ref default) = config.default {
+                    println!("\nDefault: {default}");
+                }
+            }
+            None => {
+                println!("No voice configuration file found.\n");
+                println!("Create a voices.json file at one of:");
+                println!("  ./voices.json");
+                println!("  ~/.config/conlang/voices.json");
+                println!("\nRun `conlang config voice scan` to see available voices.");
+            }
+        }
+        return Ok(());
+    }
+    #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
+    anyhow::bail!(
+        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
+    );
+}
+
+#[allow(unreachable_code)]
+async fn cmd_voice_scan() -> anyhow::Result<()> {
+    #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
+    anyhow::bail!(
+        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
+    );
+
+    #[cfg(feature = "voice-espeak")]
+    {
+        let voices = voice::espeak::list_voices()?;
+        println!("espeak:");
+
+        let (mbrola, regular): (Vec<_>, Vec<_>) = voices
+            .into_iter()
+            .partition(|v| v.identifier.contains("mb/") || v.identifier.starts_with("mb-"));
+
+        if !regular.is_empty() {
+            println!("  Installed voices:");
+            for v in &regular {
+                println!("    {:<16} {}", v.name, v.language);
+            }
+        }
+
+        let (mbrola_ok, mbrola_missing): (Vec<_>, Vec<_>) =
+            mbrola.into_iter().partition(|v| v.data_installed);
+
+        if !mbrola_ok.is_empty() {
+            println!("  MBROLA voices (data installed):");
+            for chunk in mbrola_ok.chunks(6) {
+                print!("    ");
+                for v in chunk {
+                    print!("{:<16}", v.name);
+                }
+                println!();
+            }
+        }
+
+        if !mbrola_missing.is_empty() {
+            println!("  MBROLA voices (definition exists, data missing):");
+            for chunk in mbrola_missing.chunks(6) {
+                print!("    ");
+                for v in chunk {
+                    print!("{:<16}", v.name);
+                }
+                println!();
+            }
+        }
+    }
+
+    #[cfg(feature = "voice-polly")]
+    {
+        if cfg!(feature = "voice-espeak") {
+            println!();
+        }
+        println!("polly:");
+        match voice::polly::list_voices().await {
+            Ok((region, voices)) => {
+                println!("  AWS credentials: configured (region: {region})");
+                println!("  Available voices:");
+                for v in &voices {
+                    let engines = v.engines.join(", ");
+                    println!(
+                        "    {:<16} {:<20} {:<8} {}",
+                        v.id, v.language, v.gender, engines,
+                    );
+                }
+            }
+            Err(e) => {
+                println!("  AWS credentials: not configured ({e})");
+                println!(
+                    "  Configure AWS credentials to list available voices."
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_voice_test(
+    _config_path: Option<&std::path::Path>,
+    _test: &VoiceTestCmd,
+) -> anyhow::Result<()> {
+    #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
+    {
+        let config = voice::config::load_voice_config(_config_path)?;
+        let entry = config.resolve(Some(&_test.name))?;
+        let driver = entry.create_driver().await?;
+        let sink = voice::AudioSink::new()?;
+        let ipa = _test.ipa.as_deref().unwrap_or(TEST_PHRASE);
+        println!("Testing voice \"{}\": {ipa}", _test.name);
+        driver.speak(ipa, &sink)?;
+        return Ok(());
+    }
+    #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
+    anyhow::bail!(
+        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -222,15 +522,9 @@ async fn main() -> anyhow::Result<()> {
             }
 
             #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
-            let speaker: Option<(voice::AudioSink, Box<dyn voice::Voice>)> = if cmd.speak {
-                let sink = voice::AudioSink::new()?;
-                let driver = voice::create_default_driver().await?;
-                Some((sink, driver))
-            } else {
-                None
-            };
+            let speaker = build_speaker(&cmd.voice).await?;
             #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
-            if cmd.speak {
+            if !matches!(cmd.voice.speech_mode(), SpeechMode::Silent) {
                 anyhow::bail!(
                     "speak command specified, but no voice driver was compiled in \
                      (enable the voice-polly or voice-espeak feature)"
@@ -268,14 +562,14 @@ async fn main() -> anyhow::Result<()> {
                 .collect();
 
             for _ in 0..100 {
-                let class_idx = rng.next_u64() as usize % class_generators.len();
+                let class_idx = rng.random_range(0..class_generators.len());
                 let (_, word) = class_generators[class_idx].generate(None, &mut rng);
                 let ipa = generate::format_word(&word);
                 println!("{ipa}");
 
                 #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
-                if let Some((ref sink, ref driver)) = speaker {
-                    driver.speak(&ipa, sink)?;
+                if let Some(ref speaker) = speaker {
+                    speaker.speak(&ipa, &mut rng)?;
                 }
             }
             Ok(())
@@ -288,15 +582,9 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or([3, 8]);
 
             #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
-            let speaker: Option<(voice::AudioSink, Box<dyn voice::Voice>)> = if cmd.speak {
-                let sink = voice::AudioSink::new()?;
-                let driver = voice::create_default_driver().await?;
-                Some((sink, driver))
-            } else {
-                None
-            };
+            let speaker = build_speaker(&cmd.voice).await?;
             #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
-            if cmd.speak {
+            if !matches!(cmd.voice.speech_mode(), SpeechMode::Silent) {
                 anyhow::bail!(
                     "speak command specified, but no voice driver was compiled in \
                      (enable the voice-polly or voice-espeak feature)"
@@ -319,8 +607,8 @@ async fn main() -> anyhow::Result<()> {
                         println!("{ipa}");
 
                         #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
-                        if let Some((ref sink, ref driver)) = speaker {
-                            driver.speak(&ipa, sink)?;
+                        if let Some(ref speaker) = speaker {
+                            speaker.speak(&ipa, &mut rng)?;
                         }
                     }
                 };
@@ -370,6 +658,20 @@ async fn main() -> anyhow::Result<()> {
             }
 
             Ok(())
+        }
+        Command::Config(config_cmd) => {
+            match config_cmd.sub {
+                ConfigSubcommand::Voice(voice_cmd) => {
+                    let config_path = voice_cmd.voice_config.as_deref();
+                    match voice_cmd.sub {
+                        VoiceSubcommand::List => cmd_voice_list(config_path).await,
+                        VoiceSubcommand::Scan => cmd_voice_scan().await,
+                        VoiceSubcommand::Test(test) => {
+                            cmd_voice_test(config_path, &test).await
+                        }
+                    }
+                }
+            }
         }
     }
 }

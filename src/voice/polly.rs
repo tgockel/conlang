@@ -34,6 +34,71 @@ impl PollyVoice {
     }
 }
 
+/// Information about a Polly voice, returned by [`list_voices`].
+pub struct PollyVoiceInfo {
+    pub id: String,
+    pub name: String,
+    pub language: String,
+    pub language_code: String,
+    pub gender: String,
+    pub engines: Vec<String>,
+}
+
+/// Enumerate available Polly voices and return the configured region.
+///
+/// Calls the AWS DescribeVoices API, handling pagination. Fails if credentials
+/// are not configured.
+pub async fn list_voices() -> Result<(String, Vec<PollyVoiceInfo>), anyhow::Error> {
+    let aws_conf = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let region = aws_conf
+        .region()
+        .map(|r| r.as_ref().to_string())
+        .unwrap_or_else(|| "not set".to_string());
+    let client = aws_sdk_polly::Client::new(&aws_conf);
+
+    let mut voices = Vec::new();
+    let mut next_token: Option<String> = None;
+    loop {
+        let mut req = client.describe_voices();
+        if let Some(token) = next_token.take() {
+            req = req.next_token(token);
+        }
+        let resp = req.send().await?;
+
+        if let Some(voice_list) = resp.voices {
+            for v in voice_list {
+                let engines: Vec<String> = v
+                    .supported_engines
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|e| e.as_str().to_string())
+                    .collect();
+                voices.push(PollyVoiceInfo {
+                    id: v.id.map(|id| id.as_str().to_string()).unwrap_or_default(),
+                    name: v.name.unwrap_or_default(),
+                    language: v.language_name.unwrap_or_default(),
+                    language_code: v
+                        .language_code
+                        .map(|lc| lc.as_str().to_string())
+                        .unwrap_or_default(),
+                    gender: v
+                        .gender
+                        .map(|g| g.as_str().to_string())
+                        .unwrap_or_default(),
+                    engines,
+                });
+            }
+        }
+
+        next_token = resp.next_token;
+        if next_token.is_none() {
+            break;
+        }
+    }
+
+    Ok((region, voices))
+}
+
 impl Voice for PollyVoice {
     fn speak(&self, ipa: &str, sink: &AudioSink) -> Result<(), anyhow::Error> {
         let ssml = format!(r#"<phoneme alphabet="ipa" ph="{ipa}"></phoneme>"#);

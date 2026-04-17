@@ -52,6 +52,16 @@ impl VoiceConfigFile {
         serde_json::from_str(json)
     }
 
+    /// Create drivers for all configured voices.
+    pub async fn create_all_drivers(&self) -> Result<Vec<(String, Box<dyn Voice>)>, anyhow::Error> {
+        let mut drivers = Vec::with_capacity(self.voices.len());
+        for (name, entry) in &self.voices {
+            let driver = entry.create_driver().await?;
+            drivers.push((name.clone(), driver));
+        }
+        Ok(drivers)
+    }
+
     /// Look up a voice entry by name, falling back to the configured default.
     pub fn resolve(&self, name: Option<&str>) -> Result<&VoiceEntry, anyhow::Error> {
         let key = match name {
@@ -122,11 +132,32 @@ fn user_config_dir() -> Option<std::path::PathBuf> {
 /// If `cli_path` is `Some`, only that path is tried (error if missing).
 /// Otherwise searches `./voices.json` then `~/.config/conlang/voices.json`.
 pub fn load_voice_config(cli_path: Option<&Path>) -> Result<VoiceConfigFile, anyhow::Error> {
+    try_load_voice_config(cli_path)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no voice configuration file found\n\
+             \n\
+             Searched:\n\
+             - ./voices.json\n\
+             - ~/.config/conlang/voices.json\n\
+             \n\
+             Create a voices.json file or use --voice-config <path> to specify one."
+        )
+    })
+}
+
+/// Attempt to load a voice configuration file, returning `None` if no file exists.
+///
+/// If `cli_path` is `Some` and the file doesn't exist, returns an error.
+/// If `cli_path` is `None` and no candidate is found, returns `Ok(None)`.
+pub fn try_load_voice_config(
+    cli_path: Option<&Path>,
+) -> Result<Option<VoiceConfigFile>, anyhow::Error> {
     if let Some(path) = cli_path {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
-        return VoiceConfigFile::load(&contents)
-            .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()));
+        let config = VoiceConfigFile::load(&contents)
+            .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))?;
+        return Ok(Some(config));
     }
 
     let candidates: Vec<std::path::PathBuf> = [
@@ -143,19 +174,11 @@ pub fn load_voice_config(cli_path: Option<&Path>) -> Result<VoiceConfigFile, any
                 .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
             let config = VoiceConfigFile::load(&contents)
                 .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))?;
-            return Ok(config);
+            return Ok(Some(config));
         }
     }
 
-    anyhow::bail!(
-        "no voice configuration file found\n\
-         \n\
-         Searched:\n\
-         - ./voices.json\n\
-         - ~/.config/conlang/voices.json\n\
-         \n\
-         Create a voices.json file or use --voice-config <path> to specify one."
-    )
+    Ok(None)
 }
 
 #[cfg(test)]

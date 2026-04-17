@@ -57,21 +57,3 @@ impl AudioSink {
         Ok(())
     }
 }
-
-/// Construct a default voice driver.
-///
-/// Prefers Polly when the `voice-polly` feature is enabled, otherwise falls
-/// back to eSpeak-ng with the `mb-de5` MBROLA voice.
-pub async fn create_default_driver() -> Result<Box<dyn Voice>, anyhow::Error> {
-    #[cfg(feature = "voice-polly")]
-    {
-        return Ok(Box::new(polly::PollyVoice::new(
-            aws_sdk_polly::types::VoiceId::Joanna,
-            aws_sdk_polly::types::Engine::Neural,
-        ).await?));
-    }
-    #[cfg(all(not(feature = "voice-polly"), feature = "voice-espeak"))]
-    {
-        return Ok(Box::new(espeak::EspeakVoice::new("mb-de5")?));
-    }
-}
