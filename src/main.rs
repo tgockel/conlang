@@ -126,14 +126,8 @@ impl PhonemeArgs {
                 self.non_pulmonic.as_ref().map(|x| &x[..]).unwrap_or(&[]),
             );
             let weights = generate::InventoryWeights {
-                consonant_weights: Some(sketch::cosine_weights(
-                    inventory.consonants().len(),
-                    0.0,
-                )),
-                vowel_weights: Some(sketch::cosine_weights(
-                    inventory.vowels().len(),
-                    0.0,
-                )),
+                consonant_weights: Some(sketch::cosine_weights(inventory.consonants().len(), 0.0)),
+                vowel_weights: Some(sketch::cosine_weights(inventory.vowels().len(), 0.0)),
             };
             // Wrap CLI --pattern args into a single word class named "word".
             let mut word_classes = HashMap::new();
@@ -245,9 +239,7 @@ async fn build_speaker(voice_args: &VoiceArgs) -> anyhow::Result<Option<Speaker>
     match voice_args.speech_mode() {
         SpeechMode::Silent => Ok(None),
         SpeechMode::Named(ref name) => {
-            let config = voice::config::load_voice_config(
-                voice_args.voice_config.as_deref(),
-            )?;
+            let config = voice::config::load_voice_config(voice_args.voice_config.as_deref())?;
             let voice_name = if name == "default" {
                 None
             } else {
@@ -259,10 +251,8 @@ async fn build_speaker(voice_args: &VoiceArgs) -> anyhow::Result<Option<Speaker>
             Ok(Some(Speaker::Single { sink, driver }))
         }
         SpeechMode::Random => {
-            let config = voice::config::load_voice_config(
-                voice_args.voice_config.as_deref(),
-            )?;
-            if config.voices.is_empty() {
+            let config = voice::config::load_voice_config(voice_args.voice_config.as_deref())?;
+            if config.definitions.is_empty() {
                 anyhow::bail!("--speak requires at least one voice in the config file");
             }
             let sink = voice::AudioSink::new()?;
@@ -352,13 +342,14 @@ const TEST_PHRASE: &str = "ˈpa.ta ˈka.ba ˈda.ɡa ˈsa.ʃa ˈma.na";
 // Config voice handlers
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::needless_return)]
 async fn cmd_voice_list(_config_path: Option<&std::path::Path>) -> anyhow::Result<()> {
     #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
     {
         match voice::config::try_load_voice_config(_config_path)? {
             Some(config) => {
                 println!("Configured voices:");
-                let mut entries: Vec<_> = config.voices.iter().collect();
+                let mut entries: Vec<_> = config.definitions.iter().collect();
                 entries.sort_by_key(|(name, _)| name.as_str());
                 for (name, entry) in &entries {
                     let (driver, description) = match entry {
@@ -386,27 +377,23 @@ async fn cmd_voice_list(_config_path: Option<&std::path::Path>) -> anyhow::Resul
                 }
             }
             None => {
-                println!("No voice configuration file found.\n");
-                println!("Create a voices.json file at one of:");
-                println!("  ./voices.json");
-                println!("  ~/.config/conlang/voices.json");
+                println!("No voice configuration found.\n");
+                println!("Add a \"voices\" section to your conlang config at one of:");
+                println!("  ./conlang.json");
+                println!("  ~/.conlang/config.json");
                 println!("\nRun `conlang config voice scan` to see available voices.");
             }
         }
         return Ok(());
     }
     #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
-    anyhow::bail!(
-        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
-    );
+    anyhow::bail!("no voice driver compiled in (enable the voice-polly or voice-espeak feature)");
 }
 
 #[allow(unreachable_code)]
 async fn cmd_voice_scan() -> anyhow::Result<()> {
     #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
-    anyhow::bail!(
-        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
-    );
+    anyhow::bail!("no voice driver compiled in (enable the voice-polly or voice-espeak feature)");
 
     #[cfg(feature = "voice-espeak")]
     {
@@ -470,9 +457,7 @@ async fn cmd_voice_scan() -> anyhow::Result<()> {
             }
             Err(e) => {
                 println!("  AWS credentials: not configured ({e})");
-                println!(
-                    "  Configure AWS credentials to list available voices."
-                );
+                println!("  Configure AWS credentials to list available voices.");
             }
         }
     }
@@ -480,6 +465,7 @@ async fn cmd_voice_scan() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::needless_return)]
 async fn cmd_voice_test(
     _config_path: Option<&std::path::Path>,
     _test: &VoiceTestCmd,
@@ -496,9 +482,7 @@ async fn cmd_voice_test(
         return Ok(());
     }
     #[cfg(not(any(feature = "voice-polly", feature = "voice-espeak")))]
-    anyhow::bail!(
-        "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
-    );
+    anyhow::bail!("no voice driver compiled in (enable the voice-polly or voice-espeak feature)");
 }
 
 // ---------------------------------------------------------------------------
@@ -512,13 +496,13 @@ async fn main() -> anyhow::Result<()> {
         Command::GenerateWords(cmd) => {
             let resolved = cmd.phonemes.resolve()?;
 
-            if let Some(ref class_name) = cmd.class {
-                if !resolved.word_classes.contains_key(class_name) {
-                    let available: Vec<_> = resolved.word_classes.keys().collect();
-                    anyhow::bail!(
-                        "unknown word class \"{class_name}\"; available classes: {available:?}"
-                    );
-                }
+            if let Some(ref class_name) = cmd.class
+                && !resolved.word_classes.contains_key(class_name)
+            {
+                let available: Vec<_> = resolved.word_classes.keys().collect();
+                anyhow::bail!(
+                    "unknown word class \"{class_name}\"; available classes: {available:?}"
+                );
             }
 
             #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
@@ -543,9 +527,7 @@ async fn main() -> anyhow::Result<()> {
             let class_generators: Vec<generate::ClassGenerator> = resolved
                 .word_classes
                 .into_iter()
-                .filter(|(name, _)| {
-                    cmd.class.as_ref().is_none_or(|c| c == name)
-                })
+                .filter(|(name, _)| cmd.class.as_ref().is_none_or(|c| c == name))
                 .map(|(_, wc)| {
                     let patterns = parse_patterns(&wc.patterns, &ctx);
                     let mut cg = generate::ClassGenerator::new(
@@ -576,10 +558,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::GenerateSentences(cmd) => {
             let resolved = cmd.phonemes.resolve()?;
-            let word_range = cmd
-                .words
-                .or(resolved.sentence_config)
-                .unwrap_or([3, 8]);
+            let word_range = cmd.words.or(resolved.sentence_config).unwrap_or([3, 8]);
 
             #[cfg(any(feature = "voice-polly", feature = "voice-espeak"))]
             let speaker = build_speaker(&cmd.voice).await?;
@@ -649,29 +628,23 @@ async fn main() -> anyhow::Result<()> {
                 output_loop!(tsg.generate(&mut rng));
             } else {
                 let classes = build_classes(resolved.word_classes, &ctx, &mut rng);
-                let class_list: Vec<generate::ClassGenerator> =
-                    classes.into_values().collect();
+                let class_list: Vec<generate::ClassGenerator> = classes.into_values().collect();
                 let [min, max] = word_range;
-                let sg =
-                    generate::UnstructuredSentenceGenerator::new(class_list, min, max);
+                let sg = generate::UnstructuredSentenceGenerator::new(class_list, min, max);
                 output_loop!(sg.generate(&mut rng));
             }
 
             Ok(())
         }
-        Command::Config(config_cmd) => {
-            match config_cmd.sub {
-                ConfigSubcommand::Voice(voice_cmd) => {
-                    let config_path = voice_cmd.voice_config.as_deref();
-                    match voice_cmd.sub {
-                        VoiceSubcommand::List => cmd_voice_list(config_path).await,
-                        VoiceSubcommand::Scan => cmd_voice_scan().await,
-                        VoiceSubcommand::Test(test) => {
-                            cmd_voice_test(config_path, &test).await
-                        }
-                    }
+        Command::Config(config_cmd) => match config_cmd.sub {
+            ConfigSubcommand::Voice(voice_cmd) => {
+                let config_path = voice_cmd.voice_config.as_deref();
+                match voice_cmd.sub {
+                    VoiceSubcommand::List => cmd_voice_list(config_path).await,
+                    VoiceSubcommand::Scan => cmd_voice_scan().await,
+                    VoiceSubcommand::Test(test) => cmd_voice_test(config_path, &test).await,
                 }
             }
-        }
+        },
     }
 }

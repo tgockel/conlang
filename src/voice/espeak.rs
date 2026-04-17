@@ -76,8 +76,7 @@ fn synthesize(text: &str) -> Result<Vec<i16>, anyhow::Error> {
             0,
             espeakng_sys::espeak_POSITION_TYPE_POS_CHARACTER,
             0,
-            (espeakng_sys::espeakCHARS_UTF8 | espeakng_sys::espeakPHONEMES)
-                as std::os::raw::c_uint,
+            (espeakng_sys::espeakCHARS_UTF8 | espeakng_sys::espeakPHONEMES) as std::os::raw::c_uint,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
         )
@@ -116,8 +115,8 @@ fn ipa_to_espeak_phonemes(ipa: &str) -> String {
             ' ' => out.push(' '),
 
             // Consonants: direct mappings
-            'p' | 'b' | 't' | 'd' | 'k' | 'g' | 'm' | 'n' | 's' | 'z' | 'f' | 'v' | 'h'
-            | 'l' | 'r' | 'j' | 'w' | 'c' | 'q' => out.push(ch),
+            'p' | 'b' | 't' | 'd' | 'k' | 'g' | 'm' | 'n' | 's' | 'z' | 'f' | 'v' | 'h' | 'l'
+            | 'r' | 'j' | 'w' | 'c' | 'q' => out.push(ch),
 
             // Consonants: mapped
             'ʈ' => out.push_str("t["),
@@ -189,14 +188,14 @@ fn ipa_to_espeak_phonemes(ipa: &str) -> String {
             'e' => out.push('e'),
             'ø' => out.push('W'),
             'ɘ' => out.push('@'),
-            'ɵ' => out.push_str("8"),
+            'ɵ' => out.push('8'),
             'ɤ' => out.push_str("o-"),
             'o' => out.push('o'),
             'ə' => out.push('@'),
             'ɛ' => out.push('E'),
-            'œ' => out.push_str("W"),
+            'œ' => out.push('W'),
             'ɜ' => out.push_str("3:"),
-            'ɞ' => out.push_str("3"),
+            'ɞ' => out.push('3'),
             'ʌ' => out.push('V'),
             'ɔ' => out.push_str("O:"),
             'æ' => out.push('a'),
@@ -358,10 +357,10 @@ fn read_mbrola_language(path: &std::path::Path) -> String {
     };
     for line in contents.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("language") {
-            if let Some(lang) = rest.split_whitespace().next() {
-                return lang.to_string();
-            }
+        if let Some(rest) = line.strip_prefix("language")
+            && let Some(lang) = rest.split_whitespace().next()
+        {
+            return lang.to_string();
         }
     }
     String::new()
@@ -374,9 +373,7 @@ fn check_mbrola_data(name: &str) -> bool {
         format!("/usr/share/mbrola/{data_name}/{data_name}"),
         format!("/usr/share/mbrola/voices/{data_name}"),
     ];
-    candidates
-        .iter()
-        .any(|p| std::path::Path::new(p).exists())
+    candidates.iter().any(|p| std::path::Path::new(p).exists())
 }
 
 /// A voice driver backed by eSpeak-ng.

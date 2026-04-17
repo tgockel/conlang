@@ -201,7 +201,7 @@ impl Sketch {
 
         // Resolve stress configuration.
         let default_strategy = self.stress.as_ref().map(|s| s.default);
-        let default_secondary = self.stress.as_ref().map_or(false, |s| s.secondary);
+        let default_secondary = self.stress.as_ref().is_some_and(|s| s.secondary);
 
         // Resolve word classes.
         let mut resolved_classes = HashMap::new();
@@ -268,7 +268,10 @@ fn resolve_consonant_set(
             let weights = cosine_weights(segs.len(), 0.0);
             Ok((segs, Some(weights)))
         }
-        PhonemeSet::WithDistribution { values, distribution } => {
+        PhonemeSet::WithDistribution {
+            values,
+            distribution,
+        } => {
             let segs = parse_consonant_string(&values)?;
             let weights = compute_weights(segs.len(), &distribution)?;
             Ok((segs, Some(weights)))
@@ -301,7 +304,10 @@ fn resolve_vowel_set(
             let weights = cosine_weights(segs.len(), 0.0);
             Ok((segs, Some(weights)))
         }
-        PhonemeSet::WithDistribution { values, distribution } => {
+        PhonemeSet::WithDistribution {
+            values,
+            distribution,
+        } => {
             let segs = parse_vowel_string(&values)?;
             let weights = compute_weights(segs.len(), &distribution)?;
             Ok((segs, Some(weights)))
@@ -723,7 +729,10 @@ mod tests {
             }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert_eq!(resolved.word_classes["noun"].lexicon.as_ref().unwrap().size, 50);
+        assert_eq!(
+            resolved.word_classes["noun"].lexicon.as_ref().unwrap().size,
+            50
+        );
     }
 
     #[test]
@@ -769,7 +778,10 @@ mod tests {
         let resolved = Sketch::load(json).unwrap();
         assert_eq!(resolved.default_stress, Some(StressStrategy::Trochaic));
         assert!(resolved.default_secondary);
-        assert_eq!(resolved.word_classes["word"].stress, Some(StressStrategy::Trochaic));
+        assert_eq!(
+            resolved.word_classes["word"].stress,
+            Some(StressStrategy::Trochaic)
+        );
         assert!(resolved.word_classes["word"].secondary_stress);
     }
 
@@ -785,8 +797,14 @@ mod tests {
             }
         }"#;
         let resolved = Sketch::load(json).unwrap();
-        assert_eq!(resolved.word_classes["noun"].stress, Some(StressStrategy::Trochaic));
-        assert_eq!(resolved.word_classes["det"].stress, Some(StressStrategy::None));
+        assert_eq!(
+            resolved.word_classes["noun"].stress,
+            Some(StressStrategy::Trochaic)
+        );
+        assert_eq!(
+            resolved.word_classes["det"].stress,
+            Some(StressStrategy::None)
+        );
     }
 
     #[test]

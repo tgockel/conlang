@@ -6,7 +6,7 @@ use crate::phone;
 use crate::sketch;
 use itertools::Itertools;
 use rand::{Rng, RngExt};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::collections::HashMap;
 use std::fmt;
 use thiserror::Error;
@@ -163,7 +163,11 @@ impl SegmentGenerator {
         let v_weights = ctx.weights.and_then(|w| w.vowel_weights.as_deref());
 
         match first {
-            'C' => Ok(Self::from_segments(src, ctx.inventory.consonants(), c_weights)),
+            'C' => Ok(Self::from_segments(
+                src,
+                ctx.inventory.consonants(),
+                c_weights,
+            )),
             'V' => Ok(Self::from_segments(src, ctx.inventory.vowels(), v_weights)),
             '[' => {
                 let close = src.find(']').ok_or(ParseError::UnclosedBracket)?;
@@ -331,7 +335,7 @@ impl SegmentGenerator {
     }
 
     pub fn generate(&self, rng: &mut impl Rng) -> Option<SmallVec<[phone::Segment; 2]>> {
-        if self.optional && rng.next_u64() % 2 == 0 {
+        if self.optional && rng.next_u64().is_multiple_of(2) {
             return None;
         }
         if self.weights.is_empty() {
@@ -448,7 +452,9 @@ impl Lexicon {
         }
         // Zipfian weights: rank r (1-based) gets weight proportional to 1/r.
         // We use integer weights scaled by the LCM-ish factor `size` to avoid floats.
-        let weights: Vec<u64> = (1..=size).map(|r| (size as u64 * 1000) / r as u64).collect();
+        let weights: Vec<u64> = (1..=size)
+            .map(|r| (size as u64 * 1000) / r as u64)
+            .collect();
         let total_weight: u64 = weights.iter().sum();
         Self {
             words,
@@ -1028,14 +1034,12 @@ mod gen_tests {
     #[test]
     fn unstructured_sentence_fixed_count() {
         let inventory = phone::Inventory::with_everything();
-        let classes = vec![
-            ClassGenerator::new(
-                vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
-                None,
-                None,
-                false,
-            ),
-        ];
+        let classes = vec![ClassGenerator::new(
+            vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
+            None,
+            None,
+            false,
+        )];
         let sg = UnstructuredSentenceGenerator::new(classes, 4, 4);
         let mut rng = rand::rng();
         for _ in 0..50 {
@@ -1047,20 +1051,22 @@ mod gen_tests {
     #[test]
     fn unstructured_sentence_word_count_range() {
         let inventory = phone::Inventory::with_everything();
-        let classes = vec![
-            ClassGenerator::new(
-                vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
-                None,
-                None,
-                false,
-            ),
-        ];
+        let classes = vec![ClassGenerator::new(
+            vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
+            None,
+            None,
+            false,
+        )];
         let sg = UnstructuredSentenceGenerator::new(classes, 3, 5);
         let mut rng = rand::rng();
         let mut counts = std::collections::HashSet::new();
         for _ in 0..200 {
             let sentence = sg.generate(&mut rng);
-            assert!((3..=5).contains(&sentence.len()), "got {} words", sentence.len());
+            assert!(
+                (3..=5).contains(&sentence.len()),
+                "got {} words",
+                sentence.len()
+            );
             counts.insert(sentence.len());
         }
         assert_eq!(counts.len(), 3, "expected all word counts 3-5 to appear");
@@ -1127,7 +1133,10 @@ mod gen_tests {
             all_words.push(format_word(&word));
         }
         let unique: std::collections::HashSet<_> = all_words.iter().collect();
-        assert!(unique.len() <= 5, "lexicon of 5 should produce at most 5 distinct words");
+        assert!(
+            unique.len() <= 5,
+            "lexicon of 5 should produce at most 5 distinct words"
+        );
     }
 
     #[test]
@@ -1152,9 +1161,7 @@ mod gen_tests {
                 false,
             ),
         );
-        let templates = vec![
-            vec!["det".to_string(), "noun".to_string()],
-        ];
+        let templates = vec![vec!["det".to_string(), "noun".to_string()]];
         let tsg = TemplatedSentenceGenerator::new(classes, templates, None);
         let mut rng = rand::rng();
         for _ in 0..50 {
@@ -1186,8 +1193,8 @@ mod gen_tests {
             ),
         );
         let templates = vec![
-            vec!["n".to_string(), "v".to_string()],                         // 2 words
-            vec!["n".to_string(), "v".to_string(), "n".to_string()],        // 3 words
+            vec!["n".to_string(), "v".to_string()], // 2 words
+            vec!["n".to_string(), "v".to_string(), "n".to_string()], // 3 words
         ];
         let weights = vec![95, 5];
         let tsg = TemplatedSentenceGenerator::new(classes, templates, Some(weights));
@@ -1232,9 +1239,12 @@ mod gen_tests {
             )
             .with_lexicon(10, &mut rng),
         );
-        let templates = vec![
-            vec!["det".to_string(), "noun".to_string(), "det".to_string(), "noun".to_string()],
-        ];
+        let templates = vec![vec![
+            "det".to_string(),
+            "noun".to_string(),
+            "det".to_string(),
+            "noun".to_string(),
+        ]];
         let tsg = TemplatedSentenceGenerator::new(classes, templates, None);
         let mut all_det_words = Vec::new();
         for _ in 0..50 {
@@ -1244,7 +1254,10 @@ mod gen_tests {
             all_det_words.push(format_word(&sentence[2]));
         }
         let unique_det: std::collections::HashSet<_> = all_det_words.iter().collect();
-        assert!(unique_det.len() <= 3, "det lexicon of 3 should produce at most 3 words");
+        assert!(
+            unique_det.len() <= 3,
+            "det lexicon of 3 should produce at most 3 words"
+        );
     }
 
     fn make_syllables(n: usize) -> SmallVec<[phone::Syllable; 4]> {
