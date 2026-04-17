@@ -61,6 +61,24 @@ pub struct StressConfig {
     pub secondary: bool,
 }
 
+/// Configuration for morphological affixation.
+#[derive(Debug, Deserialize)]
+pub struct MorphologyConfig {
+    /// Probability multiplier for each subsequent affix (default 0.5).
+    pub decay: Option<f64>,
+    pub suffixes: Option<Vec<AffixConfig>>,
+    pub prefixes: Option<Vec<AffixConfig>>,
+}
+
+/// A single affix definition.
+#[derive(Debug, Deserialize)]
+pub struct AffixConfig {
+    pub pattern: String,
+    pub applies_to: Option<Vec<String>>,
+    pub probability: f64,
+    pub label: Option<String>,
+}
+
 /// Configuration for the lexicon.
 #[derive(Debug, Deserialize)]
 pub struct LexiconConfig {
@@ -95,6 +113,7 @@ pub struct Sketch {
     pub sentence: Option<SentenceConfig>,
     pub grammar: Option<Vec<NamedSetEntry>>,
     pub stress: Option<StressConfig>,
+    pub morphology: Option<MorphologyConfig>,
 }
 
 /// Three ways to specify a set of phonemes, matching the documented JSON formats.
@@ -133,6 +152,20 @@ pub struct ResolvedWordClass {
     pub secondary_stress: bool,
 }
 
+/// A resolved affix ready for generation.
+pub struct ResolvedAffix {
+    pub pattern: String,
+    pub applies_to: Option<Vec<String>>,
+    pub probability: f64,
+}
+
+/// Resolved morphology configuration.
+pub struct ResolvedMorphology {
+    pub decay: f64,
+    pub prefixes: Vec<ResolvedAffix>,
+    pub suffixes: Vec<ResolvedAffix>,
+}
+
 /// The result of resolving a sketch into domain types.
 pub struct Resolved {
     pub inventory: phone::Inventory,
@@ -145,6 +178,7 @@ pub struct Resolved {
     pub grammar_weights: Option<Vec<u32>>,
     pub default_stress: Option<StressStrategy>,
     pub default_secondary: bool,
+    pub morphology: Option<ResolvedMorphology>,
 }
 
 impl Sketch {
@@ -244,6 +278,54 @@ impl Sketch {
             None => (None, None),
         };
 
+        let morphology = match self.morphology {
+            Some(mc) => {
+                let decay = mc.decay.unwrap_or(0.5);
+                if !(0.0..=1.0).contains(&decay) {
+                    return Err(SketchError::Validation(
+                        "morphology.decay must be between 0.0 and 1.0".into(),
+                    ));
+                }
+                let resolve_affixes = |affixes: Option<Vec<AffixConfig>>| -> Result<Vec<ResolvedAffix>, SketchError> {
+                    let Some(affixes) = affixes else {
+                        return Ok(Vec::new());
+                    };
+                    let mut out = Vec::with_capacity(affixes.len());
+                    for affix in affixes {
+                        if !(0.0..=1.0).contains(&affix.probability) {
+                            return Err(SketchError::Validation(format!(
+                                "affix probability must be between 0.0 and 1.0, got {}",
+                                affix.probability,
+                            )));
+                        }
+                        if let Some(ref classes) = affix.applies_to {
+                            for class_name in classes {
+                                if !resolved_classes.contains_key(class_name) {
+                                    return Err(SketchError::Validation(format!(
+                                        "morphology affix references unknown word class: {class_name:?}",
+                                    )));
+                                }
+                            }
+                        }
+                        out.push(ResolvedAffix {
+                            pattern: affix.pattern,
+                            applies_to: affix.applies_to,
+                            probability: affix.probability,
+                        });
+                    }
+                    Ok(out)
+                };
+                let prefixes = resolve_affixes(mc.prefixes)?;
+                let suffixes = resolve_affixes(mc.suffixes)?;
+                Some(ResolvedMorphology {
+                    decay,
+                    prefixes,
+                    suffixes,
+                })
+            }
+            None => None,
+        };
+
         Ok(Resolved {
             inventory,
             consonant_weights,
@@ -255,6 +337,7 @@ impl Sketch {
             grammar_weights,
             default_stress: default_strategy,
             default_secondary,
+            morphology,
         })
     }
 }
@@ -822,6 +905,97 @@ mod tests {
             "vowels": "aiu",
             "stress": { "default": "oops" },
             "word_classes": { "word": { "patterns": ["CVC"] } }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn morphology_loads() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": {
+                "noun": { "patterns": ["CVC"] },
+                "verb": { "patterns": ["CV"] }
+            },
+            "morphology": {
+                "decay": 0.4,
+                "suffixes": [
+                    { "pattern": "VC", "applies_to": ["verb"], "probability": 0.3, "label": "past" }
+                ],
+                "prefixes": [
+                    { "pattern": "CV", "probability": 0.1 }
+                ]
+            }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let morph = resolved.morphology.unwrap();
+        assert!((morph.decay - 0.4).abs() < f64::EPSILON);
+        assert_eq!(morph.suffixes.len(), 1);
+        assert_eq!(morph.suffixes[0].pattern, "VC");
+        assert_eq!(
+            morph.suffixes[0].applies_to.as_deref().unwrap(),
+            &["verb".to_string()]
+        );
+        assert!((morph.suffixes[0].probability - 0.3).abs() < f64::EPSILON);
+        assert_eq!(morph.prefixes.len(), 1);
+        assert!(morph.prefixes[0].applies_to.is_none());
+    }
+
+    #[test]
+    fn morphology_absent_ok() {
+        let resolved = Sketch::load(MINIMAL).unwrap();
+        assert!(resolved.morphology.is_none());
+    }
+
+    #[test]
+    fn morphology_default_decay() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "morphology": {
+                "suffixes": [{ "pattern": "V", "probability": 0.5 }]
+            }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let morph = resolved.morphology.unwrap();
+        assert!((morph.decay - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn morphology_invalid_probability_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "morphology": {
+                "suffixes": [{ "pattern": "V", "probability": 1.5 }]
+            }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn morphology_invalid_decay_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "morphology": { "decay": 2.0 }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn morphology_unknown_class_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "morphology": {
+                "suffixes": [{ "pattern": "V", "applies_to": ["nope"], "probability": 0.5 }]
+            }
         }"#;
         assert!(Sketch::load(json).is_err());
     }

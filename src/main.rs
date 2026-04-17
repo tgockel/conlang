@@ -92,6 +92,7 @@ struct ResolvedArgs {
     word_classes: HashMap<String, sketch::ResolvedWordClass>,
     grammar: Option<Vec<String>>,
     grammar_weights: Option<Vec<u32>>,
+    morphology: Option<sketch::ResolvedMorphology>,
 }
 
 impl PhonemeArgs {
@@ -112,6 +113,7 @@ impl PhonemeArgs {
                 word_classes: resolved.word_classes,
                 grammar: resolved.grammar,
                 grammar_weights: resolved.grammar_weights,
+                morphology: resolved.morphology,
             })
         } else {
             let inventory = phone::Inventory::from_base_phones(
@@ -149,9 +151,42 @@ impl PhonemeArgs {
                 word_classes,
                 grammar: None,
                 grammar_weights: None,
+                morphology: None,
             })
         }
     }
+}
+
+fn build_class_morphology(
+    class_name: &str,
+    morphology: &sketch::ResolvedMorphology,
+    ctx: &generate::ParseContext,
+) -> Option<generate::ClassMorphology> {
+    let filter_affixes = |affixes: &[sketch::ResolvedAffix]| -> Vec<generate::AffixGenerator> {
+        affixes
+            .iter()
+            .filter(|a| {
+                a.applies_to
+                    .as_ref()
+                    .is_none_or(|classes| classes.iter().any(|c| c == class_name))
+            })
+            .map(|a| {
+                let generator = generate::WordGenerator::parse(&a.pattern, ctx)
+                    .unwrap_or_else(|e| panic!("Could not parse affix pattern {:?}: {e}", a.pattern));
+                generate::AffixGenerator::new(generator, a.probability)
+            })
+            .collect()
+    };
+    let prefixes = filter_affixes(&morphology.prefixes);
+    let suffixes = filter_affixes(&morphology.suffixes);
+    if prefixes.is_empty() && suffixes.is_empty() {
+        return None;
+    }
+    Some(generate::ClassMorphology::new(
+        morphology.decay,
+        prefixes,
+        suffixes,
+    ))
 }
 
 fn parse_patterns(
@@ -528,11 +563,16 @@ async fn main() -> anyhow::Result<()> {
                 .word_classes
                 .into_iter()
                 .filter(|(name, _)| cmd.class.as_ref().is_none_or(|c| c == name))
-                .map(|(_, wc)| {
+                .map(|(name, wc)| {
                     let patterns = parse_patterns(&wc.patterns, &ctx);
+                    let morph = resolved
+                        .morphology
+                        .as_ref()
+                        .and_then(|m| build_class_morphology(&name, m, &ctx));
                     let mut cg = generate::ClassGenerator::new(
                         patterns,
                         wc.pattern_weights,
+                        morph,
                         wc.stress,
                         wc.secondary_stress,
                     );
@@ -595,14 +635,19 @@ async fn main() -> anyhow::Result<()> {
 
             // Helper: build ClassGenerator instances from resolved word classes.
             let build_classes = |word_classes: HashMap<String, sketch::ResolvedWordClass>,
+                                 morphology: &Option<sketch::ResolvedMorphology>,
                                  ctx: &generate::ParseContext,
                                  rng: &mut rand::rngs::ThreadRng| {
                 let mut classes = HashMap::new();
                 for (name, wc) in word_classes {
                     let patterns = parse_patterns(&wc.patterns, ctx);
+                    let morph = morphology
+                        .as_ref()
+                        .and_then(|m| build_class_morphology(&name, m, ctx));
                     let mut cg = generate::ClassGenerator::new(
                         patterns,
                         wc.pattern_weights,
+                        morph,
                         wc.stress,
                         wc.secondary_stress,
                     );
@@ -615,7 +660,8 @@ async fn main() -> anyhow::Result<()> {
             };
 
             if let Some(grammar) = resolved.grammar {
-                let classes = build_classes(resolved.word_classes, &ctx, &mut rng);
+                let classes =
+                    build_classes(resolved.word_classes, &resolved.morphology, &ctx, &mut rng);
                 let templates: Vec<Vec<String>> = grammar
                     .iter()
                     .map(|t| t.split_ascii_whitespace().map(String::from).collect())
@@ -627,7 +673,8 @@ async fn main() -> anyhow::Result<()> {
                 );
                 output_loop!(tsg.generate(&mut rng));
             } else {
-                let classes = build_classes(resolved.word_classes, &ctx, &mut rng);
+                let classes =
+                    build_classes(resolved.word_classes, &resolved.morphology, &ctx, &mut rng);
                 let class_list: Vec<generate::ClassGenerator> = classes.into_values().collect();
                 let [min, max] = word_range;
                 let sg = generate::UnstructuredSentenceGenerator::new(class_list, min, max);

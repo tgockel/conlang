@@ -281,6 +281,18 @@ impl SegmentGenerator {
                         c_weights,
                         |x| x.manner().is_some_and(|m| manners.contains(&m)),
                     ))
+                } else if let Ok((seg, rest)) = phone::Segment::parse_ipa(src) {
+                    let consumed = src.len() - rest.len();
+                    let display = src[..consumed].to_string();
+                    Ok((
+                        Self {
+                            display,
+                            choices: smallvec![smallvec![seg]],
+                            weights: SmallVec::new(),
+                            optional: false,
+                        },
+                        rest,
+                    ))
                 } else {
                     Err(ParseError::UnknownCharacter(first))
                 }
@@ -424,6 +436,64 @@ pub fn assign_stress(
     }
 }
 
+/// A single resolved affix with its parsed generator and probability.
+pub struct AffixGenerator {
+    generator: WordGenerator,
+    probability: f64,
+}
+
+/// Pre-filtered morphology for a specific word class.
+pub struct ClassMorphology {
+    decay: f64,
+    prefixes: Vec<AffixGenerator>,
+    suffixes: Vec<AffixGenerator>,
+}
+
+impl ClassMorphology {
+    pub fn new(decay: f64, prefixes: Vec<AffixGenerator>, suffixes: Vec<AffixGenerator>) -> Self {
+        Self {
+            decay,
+            prefixes,
+            suffixes,
+        }
+    }
+
+}
+
+impl AffixGenerator {
+    pub fn new(generator: WordGenerator, probability: f64) -> Self {
+        Self {
+            generator,
+            probability,
+        }
+    }
+}
+
+fn apply_morphology(
+    word: &mut SmallVec<[phone::Syllable; 4]>,
+    morphology: &ClassMorphology,
+    rng: &mut impl Rng,
+) {
+    let mut prefix_decay = 1.0;
+    for affix in &morphology.prefixes {
+        if rng.random::<f64>() < affix.probability * prefix_decay {
+            let syllables = affix.generator.generate(rng);
+            for (i, syl) in syllables.into_iter().enumerate() {
+                word.insert(i, syl);
+            }
+            prefix_decay *= morphology.decay;
+        }
+    }
+    let mut suffix_decay = 1.0;
+    for affix in &morphology.suffixes {
+        if rng.random::<f64>() < affix.probability * suffix_decay {
+            let syllables = affix.generator.generate(rng);
+            word.extend(syllables);
+            suffix_decay *= morphology.decay;
+        }
+    }
+}
+
 /// A pre-generated vocabulary with Zipfian frequency weights.
 pub struct Lexicon {
     words: Vec<SmallVec<[phone::Syllable; 4]>>,
@@ -437,6 +507,7 @@ impl Lexicon {
         size: usize,
         patterns: &[WordGenerator],
         pattern_weights: Option<&[u32]>,
+        morphology: Option<&ClassMorphology>,
         stress: Option<sketch::StressStrategy>,
         secondary_stress: bool,
         rng: &mut impl Rng,
@@ -445,6 +516,9 @@ impl Lexicon {
         for _ in 0..size {
             let pattern = weighted_choice(patterns, pattern_weights, rng);
             let mut word = pattern.generate(rng);
+            if let Some(morph) = morphology {
+                apply_morphology(&mut word, morph, rng);
+            }
             if let Some(strategy) = stress {
                 assign_stress(&mut word, strategy, secondary_stress);
             }
@@ -558,6 +632,7 @@ pub struct ClassGenerator {
     patterns: Vec<WordGenerator>,
     pattern_weights: Option<Vec<u32>>,
     lexicon: Option<Lexicon>,
+    morphology: Option<ClassMorphology>,
     stress: Option<sketch::StressStrategy>,
     secondary_stress: bool,
 }
@@ -566,6 +641,7 @@ impl ClassGenerator {
     pub fn new(
         patterns: Vec<WordGenerator>,
         pattern_weights: Option<Vec<u32>>,
+        morphology: Option<ClassMorphology>,
         stress: Option<sketch::StressStrategy>,
         secondary_stress: bool,
     ) -> Self {
@@ -573,6 +649,7 @@ impl ClassGenerator {
             patterns,
             pattern_weights,
             lexicon: None,
+            morphology,
             stress,
             secondary_stress,
         }
@@ -584,6 +661,7 @@ impl ClassGenerator {
             size,
             &self.patterns,
             self.pattern_weights.as_deref(),
+            self.morphology.as_ref(),
             self.stress,
             self.secondary_stress,
             rng,
@@ -603,6 +681,9 @@ impl ClassGenerator {
         } else {
             let pattern = weighted_choice(&self.patterns, self.pattern_weights.as_deref(), rng);
             let mut word = pattern.generate(rng);
+            if let Some(ref morph) = self.morphology {
+                apply_morphology(&mut word, morph, rng);
+            }
             if let Some(strategy) = self.stress {
                 assign_stress(&mut word, strategy, self.secondary_stress);
             }
@@ -991,6 +1072,44 @@ mod gen_tests {
     }
 
     #[test]
+    fn parse_literal_ipa_consonant() {
+        let inventory = phone::Inventory::with_everything();
+        let wg = WordGenerator::parse("Vn", &ctx(&inventory)).unwrap();
+        assert_eq!(format!("{wg}"), "Vn");
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let word = wg.generate(&mut rng);
+            assert_eq!(word[0].segments().len(), 2);
+            assert_eq!(
+                word[0].segments()[1],
+                phone::Segment::from(phone::Consonant::N)
+            );
+        }
+    }
+
+    #[test]
+    fn parse_literal_ipa_vowel() {
+        let inventory = phone::Inventory::with_everything();
+        let wg = WordGenerator::parse("Ca", &ctx(&inventory)).unwrap();
+        assert_eq!(format!("{wg}"), "Ca");
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let word = wg.generate(&mut rng);
+            assert_eq!(
+                word[0].segments()[1],
+                phone::Segment::from(phone::Vowel::A)
+            );
+        }
+    }
+
+    #[test]
+    fn parse_literal_ipa_multi_byte() {
+        let inventory = phone::Inventory::with_everything();
+        let wg = WordGenerator::parse("Vŋ", &ctx(&inventory)).unwrap();
+        assert_eq!(format!("{wg}"), "Vŋ");
+    }
+
+    #[test]
     fn format_word_single_syllable() {
         let syl = phone::Syllable::new(&[
             phone::Segment::from(phone::Consonant::K),
@@ -1038,6 +1157,7 @@ mod gen_tests {
             vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
             None,
             None,
+            None,
             false,
         )];
         let sg = UnstructuredSentenceGenerator::new(classes, 4, 4);
@@ -1053,6 +1173,7 @@ mod gen_tests {
         let inventory = phone::Inventory::with_everything();
         let classes = vec![ClassGenerator::new(
             vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
+            None,
             None,
             None,
             false,
@@ -1080,10 +1201,12 @@ mod gen_tests {
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
                 None,
+                None,
                 false,
             ),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap()],
+                None,
                 None,
                 None,
                 false,
@@ -1111,7 +1234,7 @@ mod gen_tests {
     fn class_generator_produces_words() {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()];
-        let cg = ClassGenerator::new(patterns, None, None, false);
+        let cg = ClassGenerator::new(patterns, None, None, None, false);
         let mut rng = rand::rng();
         for _ in 0..50 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1125,7 +1248,7 @@ mod gen_tests {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
         let mut rng = rand::rng();
-        let cg = ClassGenerator::new(patterns, None, None, false).with_lexicon(5, &mut rng);
+        let cg = ClassGenerator::new(patterns, None, None, None, false).with_lexicon(5, &mut rng);
         let mut all_words = Vec::new();
         for _ in 0..100 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1149,6 +1272,7 @@ mod gen_tests {
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
                 None,
+                None,
                 false,
             ),
         );
@@ -1156,6 +1280,7 @@ mod gen_tests {
             "noun".to_string(),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
+                None,
                 None,
                 None,
                 false,
@@ -1180,6 +1305,7 @@ mod gen_tests {
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
                 None,
                 None,
+                None,
                 false,
             ),
         );
@@ -1187,6 +1313,7 @@ mod gen_tests {
             "v".to_string(),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
+                None,
                 None,
                 None,
                 false,
@@ -1225,6 +1352,7 @@ mod gen_tests {
                 vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()],
                 None,
                 None,
+                None,
                 false,
             )
             .with_lexicon(3, &mut rng),
@@ -1233,6 +1361,7 @@ mod gen_tests {
             "noun".to_string(),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()],
+                None,
                 None,
                 None,
                 false,
@@ -1354,5 +1483,106 @@ mod gen_tests {
         let mut word = make_syllables(2);
         assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
         assert_eq!(format_word(&word), "ˈta.ta");
+    }
+
+    fn make_morphology(
+        inventory: &phone::Inventory,
+        decay: f64,
+        prefix_patterns: &[(&str, f64)],
+        suffix_patterns: &[(&str, f64)],
+    ) -> ClassMorphology {
+        let ctx = ctx(inventory);
+        let prefixes = prefix_patterns
+            .iter()
+            .map(|(pat, prob)| AffixGenerator::new(WordGenerator::parse(pat, &ctx).unwrap(), *prob))
+            .collect();
+        let suffixes = suffix_patterns
+            .iter()
+            .map(|(pat, prob)| AffixGenerator::new(WordGenerator::parse(pat, &ctx).unwrap(), *prob))
+            .collect();
+        ClassMorphology::new(decay, prefixes, suffixes)
+    }
+
+    #[test]
+    fn morphology_suffix_always_attaches() {
+        let inventory = phone::Inventory::with_everything();
+        let morph = make_morphology(&inventory, 0.5, &[], &[("V", 1.0)]);
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let mut word = make_syllables(1);
+            apply_morphology(&mut word, &morph, &mut rng);
+            assert_eq!(word.len(), 2, "suffix should always attach at p=1.0");
+        }
+    }
+
+    #[test]
+    fn morphology_prefix_always_attaches() {
+        let inventory = phone::Inventory::with_everything();
+        let morph = make_morphology(&inventory, 0.5, &[("C", 1.0)], &[]);
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let mut word = make_syllables(1);
+            let original_first = word[0].segments()[0];
+            apply_morphology(&mut word, &morph, &mut rng);
+            assert_eq!(word.len(), 2, "prefix should always attach at p=1.0");
+            assert_eq!(
+                word[1].segments()[0], original_first,
+                "original syllable should be second"
+            );
+        }
+    }
+
+    #[test]
+    fn morphology_zero_probability_never_attaches() {
+        let inventory = phone::Inventory::with_everything();
+        let morph = make_morphology(&inventory, 0.5, &[("C", 0.0)], &[("V", 0.0)]);
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let mut word = make_syllables(1);
+            apply_morphology(&mut word, &morph, &mut rng);
+            assert_eq!(word.len(), 1, "no affix should attach at p=0.0");
+        }
+    }
+
+    #[test]
+    fn morphology_decay_reduces_stacking() {
+        let inventory = phone::Inventory::with_everything();
+        let morph = make_morphology(&inventory, 0.0, &[], &[("V", 1.0), ("V", 1.0)]);
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let mut word = make_syllables(1);
+            apply_morphology(&mut word, &morph, &mut rng);
+            assert_eq!(
+                word.len(),
+                2,
+                "decay=0.0 should prevent second suffix (effective p = 1.0 * 0.0 = 0.0)"
+            );
+        }
+    }
+
+    #[test]
+    fn morphology_before_stress() {
+        let inventory = phone::Inventory::with_everything();
+        let ctx = ctx(&inventory);
+        let suffix = AffixGenerator::new(WordGenerator::parse("V", &ctx).unwrap(), 1.0);
+        let morph = ClassMorphology::new(0.5, vec![], vec![suffix]);
+        let patterns = vec![WordGenerator::parse("CV", &ctx).unwrap()];
+        let cg = ClassGenerator::new(
+            patterns,
+            None,
+            Some(morph),
+            Some(sketch::StressStrategy::Final),
+            false,
+        );
+        let mut rng = rand::rng();
+        for _ in 0..50 {
+            let (_, word) = cg.generate(None, &mut rng);
+            assert_eq!(word.len(), 2, "suffix should have been added");
+            assert_eq!(
+                word[1].stress(),
+                phone::Stress::Primary,
+                "stress should be on final syllable (the suffix)"
+            );
+        }
     }
 }

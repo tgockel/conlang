@@ -63,6 +63,19 @@
       "stress": "none"
     }
   },
+  "morphology": {
+    "decay": 0.4,
+    "suffixes": [
+      { "pattern": "V$K", "applies_to": ["verb"], "probability": 0.25, "label": "past tense" },
+      { "pattern": "Vŋ",  "applies_to": ["verb"], "probability": 0.2,  "label": "progressive" },
+      { "pattern": "$K",  "applies_to": ["noun"], "probability": 0.3,  "label": "plural" },
+      { "pattern": "lV",  "applies_to": ["adj"],  "probability": 0.2,  "label": "adverbial" }
+    ],
+    "prefixes": [
+      { "pattern": "Vn",  "applies_to": ["verb", "adj"], "probability": 0.1, "label": "negation" },
+      { "pattern": "ɹV",  "applies_to": ["verb"],        "probability": 0.08, "label": "repetition" }
+    ]
+  },
   "grammar": [
     {"value": "det noun verb det noun",          "weight": 20},
     {"value": "det noun verb",                   "weight": 15},
