@@ -7,3 +7,6 @@
   - [Phonotactics](./lang/phonotactics.md)
   - [Frequencies](./lang/frequencies.md)
   - [Grammar](./lang/grammar.md)
+- [Voices](./voices/README.md)
+  - [eSpeak-ng](./voices/espeak.md)
+  - [AWS Polly](./voices/polly.md)

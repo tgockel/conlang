@@ -6,6 +6,7 @@ phonetic shifts, and helps manage your lexicon (which can include borrowed words
 
 What distinguishes this toolkit from others is the focus on phonetics.
 **It is meant to get to get you from zero to hearing a language spoken as quickly as possible.**
+The [Voices](./voices/README.md) section covers setting up text-to-speech so you can hear your language.
 This allows for rapid iteration on adding or removing noises and patterns to get to something that sounds like what you
 want.
 
