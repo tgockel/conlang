@@ -354,12 +354,27 @@ struct VoiceConfigCmd {
 
 #[derive(clap::Subcommand, Debug)]
 enum VoiceSubcommand {
+    /// Create a starter conlang config file with an example voices section.
+    Init(VoiceInitCmd),
     /// List configured voices from the voice config file.
     List,
     /// Discover available TTS drivers and voices on this system.
     Scan,
     /// Speak a test phrase with a configured voice.
     Test(VoiceTestCmd),
+}
+
+#[derive(Parser, Debug)]
+struct VoiceInitCmd {
+    /// Where to write the config file.
+    #[arg(long, default_value = "conlang.json")]
+    pub output: std::path::PathBuf,
+    /// Write to the user-level config (~/.conlang/config.json) instead of ./conlang.json.
+    #[arg(long, short = 'g', conflicts_with = "output")]
+    pub global: bool,
+    /// Overwrite the file if it already exists.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -376,6 +391,80 @@ const TEST_PHRASE: &str = "ˈpa.ta ˈka.ba ˈda.ɡa ˈsa.ʃa ˈma.na";
 // ---------------------------------------------------------------------------
 // Config voice handlers
 // ---------------------------------------------------------------------------
+
+/// Build a starter voices section containing one example entry per compiled-in
+/// driver. Bails if no voice driver was compiled in (nothing to emit).
+fn voice_config_template() -> anyhow::Result<String> {
+    use serde_json::{Map, Value, json};
+
+    #[allow(unused_mut)]
+    let mut definitions = Map::new();
+
+    #[cfg(feature = "voice-espeak")]
+    definitions.insert(
+        "espeak-default".to_string(),
+        json!({ "driver": "espeak", "voice": "en", "rate": 150 }),
+    );
+    #[cfg(feature = "voice-polly")]
+    definitions.insert(
+        "polly-joanna".to_string(),
+        json!({ "driver": "polly", "voice_id": "Joanna", "engine": "neural" }),
+    );
+
+    if definitions.is_empty() {
+        anyhow::bail!(
+            "no voice driver compiled in (enable the voice-polly or voice-espeak feature)"
+        );
+    }
+
+    // Prefer the local, credential-free eSpeak voice as the default when present.
+    let default = if cfg!(feature = "voice-espeak") {
+        "espeak-default"
+    } else {
+        "polly-joanna"
+    };
+
+    let config = json!({
+        "voices": {
+            "definitions": Value::Object(definitions),
+            "default": default,
+        }
+    });
+    Ok(serde_json::to_string_pretty(&config)? + "\n")
+}
+
+fn cmd_voice_init(cmd: &VoiceInitCmd) -> anyhow::Result<()> {
+    let template = voice_config_template()?;
+
+    let output = if cmd.global {
+        let home = std::env::var("HOME")
+            .map_err(|_| anyhow::anyhow!("cannot determine home directory ($HOME not set)"))?;
+        std::path::PathBuf::from(home)
+            .join(".conlang")
+            .join("config.json")
+    } else {
+        cmd.output.clone()
+    };
+
+    if output.exists() && !cmd.force {
+        anyhow::bail!(
+            "{} already exists; pass --force to overwrite or --output <path> \
+             to write elsewhere",
+            output.display()
+        );
+    }
+    if let Some(parent) = output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("failed to create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&output, template)
+        .map_err(|e| anyhow::anyhow!("failed to write {}: {e}", output.display()))?;
+    println!("Wrote example voice config to {}", output.display());
+    println!("Edit it, then run `conlang config voice test <name>` or generate with --speak.");
+    Ok(())
+}
 
 #[allow(clippy::needless_return)]
 async fn cmd_voice_list(_config_path: Option<&std::path::Path>) -> anyhow::Result<()> {
@@ -687,6 +776,7 @@ async fn main() -> anyhow::Result<()> {
             ConfigSubcommand::Voice(voice_cmd) => {
                 let config_path = voice_cmd.voice_config.as_deref();
                 match voice_cmd.sub {
+                    VoiceSubcommand::Init(init) => cmd_voice_init(&init),
                     VoiceSubcommand::List => cmd_voice_list(config_path).await,
                     VoiceSubcommand::Scan => cmd_voice_scan().await,
                     VoiceSubcommand::Test(test) => cmd_voice_test(config_path, &test).await,

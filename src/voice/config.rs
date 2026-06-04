@@ -145,7 +145,7 @@ pub fn load_voice_config(cli_path: Option<&Path>) -> Result<VoiceSection, anyhow
              - ./conlang.json\n\
              - ~/.conlang/config.json\n\
              \n\
-             Create a conlang.json file or use --voice-config <path> to specify one."
+             Create a conlang.json with `conlang config voice init`, or use --voice-config <path> to specify one."
         )
     })
 }

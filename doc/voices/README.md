@@ -35,7 +35,16 @@ Build with the eSpeak feature flag:
 cargo build --features voice-espeak
 ```
 
-Create a `conlang.json` in your project directory with a single voice:
+The quickest way to create a `conlang.json` is to let the CLI scaffold one for you:
+
+```sh
+conlang config voice init
+```
+
+This writes a starter `conlang.json` with one example voice per driver you compiled in (eSpeak and/or Polly), which you can then edit.
+It refuses to overwrite an existing file unless you pass `--force`. Use `--output <path>` to write elsewhere, or `--global`/`-g` to write the user-level config at `~/.conlang/config.json`.
+
+Or create the file by hand in your project directory with a single voice:
 
 ```json
 {
