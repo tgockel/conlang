@@ -27,8 +27,9 @@ pub struct AudioSink {
 
 impl AudioSink {
     pub fn new() -> Result<Self, anyhow::Error> {
-        let _mixer = rodio::DeviceSinkBuilder::open_default_sink()
+        let mut _mixer = rodio::DeviceSinkBuilder::open_default_sink()
             .map_err(|e| anyhow::anyhow!("Failed to open audio output: {e}"))?;
+        _mixer.log_on_drop(false);
         let player = rodio::Player::connect_new(_mixer.mixer());
         Ok(Self { player, _mixer })
     }
