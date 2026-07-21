@@ -1,7 +1,6 @@
 [book]
 authors = ["Travis Gockel"]
 language = "en"
-multilingual = false
 src = "doc"
 
 [build]
