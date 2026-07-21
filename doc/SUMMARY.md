@@ -6,6 +6,8 @@
   - [Phonemes](./lang/phonemes.md)
   - [Phonotactics](./lang/phonotactics.md)
   - [Frequencies](./lang/frequencies.md)
+  - [Stress](./lang/stress.md)
+  - [Vowel Reduction](./lang/reduction.md)
   - [Grammar](./lang/grammar.md)
   - [Morphology](./lang/morphology.md)
 - [Voices](./voices/README.md)

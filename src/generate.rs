@@ -426,12 +426,33 @@ pub fn assign_stress(
     let syl = word.remove(primary_idx).with_stress(phone::Stress::Primary);
     word.insert(primary_idx, syl);
 
+    // Secondary stress falls on alternating syllables sharing the primary's
+    // parity, so the word parses into uniform two-syllable feet (trochaic:
+    // ˈta.ka.ˌta.ka; iambic: ta.ˈta.ta.ˌta) and never clashes with the primary.
     if secondary && word.len() >= 3 {
-        for i in (0..word.len()).step_by(2) {
+        for i in (primary_idx % 2..word.len()).step_by(2) {
             if i != primary_idx && word[i].stress() == phone::Stress::None {
                 let syl = word.remove(i).with_stress(phone::Stress::Secondary);
                 word.insert(i, syl);
             }
+        }
+    }
+}
+
+/// Reduce vowels in unstressed syllables with the configured probability and
+/// targets. Must run after `assign_stress` so stress marking is final;
+/// secondary-stressed syllables are never reduced.
+pub fn apply_reduction(
+    word: &mut SmallVec<[phone::Syllable; 4]>,
+    reduction: &sketch::ResolvedReduction,
+    rng: &mut impl Rng,
+) {
+    if reduction.probability <= 0.0 {
+        return;
+    }
+    for syl in word.iter_mut() {
+        if syl.stress() == phone::Stress::None && rng.random::<f64>() < reduction.probability {
+            syl.reduce_vowels(|v| reduction.targets.target_for(v));
         }
     }
 }
@@ -503,6 +524,7 @@ pub struct Lexicon {
 
 impl Lexicon {
     /// Pre-generate `size` distinct words using the given patterns and optional pattern weights.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         size: usize,
         patterns: &[WordGenerator],
@@ -510,6 +532,7 @@ impl Lexicon {
         morphology: Option<&ClassMorphology>,
         stress: Option<sketch::StressStrategy>,
         secondary_stress: bool,
+        reduction: &sketch::ResolvedReduction,
         rng: &mut impl Rng,
     ) -> Self {
         let mut words = Vec::with_capacity(size);
@@ -522,6 +545,7 @@ impl Lexicon {
             if let Some(strategy) = stress {
                 assign_stress(&mut word, strategy, secondary_stress);
             }
+            apply_reduction(&mut word, reduction, rng);
             words.push(word);
         }
         // Zipfian weights: rank r (1-based) gets weight proportional to 1/r.
@@ -635,6 +659,7 @@ pub struct ClassGenerator {
     morphology: Option<ClassMorphology>,
     stress: Option<sketch::StressStrategy>,
     secondary_stress: bool,
+    reduction: sketch::ResolvedReduction,
 }
 
 impl ClassGenerator {
@@ -644,6 +669,7 @@ impl ClassGenerator {
         morphology: Option<ClassMorphology>,
         stress: Option<sketch::StressStrategy>,
         secondary_stress: bool,
+        reduction: sketch::ResolvedReduction,
     ) -> Self {
         Self {
             patterns,
@@ -652,6 +678,7 @@ impl ClassGenerator {
             morphology,
             stress,
             secondary_stress,
+            reduction,
         }
     }
 
@@ -664,6 +691,7 @@ impl ClassGenerator {
             self.morphology.as_ref(),
             self.stress,
             self.secondary_stress,
+            &self.reduction,
             rng,
         ));
         self
@@ -687,6 +715,7 @@ impl ClassGenerator {
             if let Some(strategy) = self.stress {
                 assign_stress(&mut word, strategy, self.secondary_stress);
             }
+            apply_reduction(&mut word, &self.reduction, rng);
             (None, word)
         }
     }
@@ -1159,6 +1188,7 @@ mod gen_tests {
             None,
             None,
             false,
+            sketch::ResolvedReduction::default(),
         )];
         let sg = UnstructuredSentenceGenerator::new(classes, 4, 4);
         let mut rng = rand::rng();
@@ -1177,6 +1207,7 @@ mod gen_tests {
             None,
             None,
             false,
+            sketch::ResolvedReduction::default(),
         )];
         let sg = UnstructuredSentenceGenerator::new(classes, 3, 5);
         let mut rng = rand::rng();
@@ -1203,6 +1234,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
             ClassGenerator::new(
                 vec![WordGenerator::parse("CVC CV", &ctx(&inventory)).unwrap()],
@@ -1210,6 +1242,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
         ];
         let sg = UnstructuredSentenceGenerator::new(classes, 5, 5);
@@ -1234,7 +1267,7 @@ mod gen_tests {
     fn class_generator_produces_words() {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CVC", &ctx(&inventory)).unwrap()];
-        let cg = ClassGenerator::new(patterns, None, None, None, false);
+        let cg = ClassGenerator::new(patterns, None, None, None, false, sketch::ResolvedReduction::default());
         let mut rng = rand::rng();
         for _ in 0..50 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1248,7 +1281,7 @@ mod gen_tests {
         let inventory = phone::Inventory::with_everything();
         let patterns = vec![WordGenerator::parse("CV", &ctx(&inventory)).unwrap()];
         let mut rng = rand::rng();
-        let cg = ClassGenerator::new(patterns, None, None, None, false).with_lexicon(5, &mut rng);
+        let cg = ClassGenerator::new(patterns, None, None, None, false, sketch::ResolvedReduction::default()).with_lexicon(5, &mut rng);
         let mut all_words = Vec::new();
         for _ in 0..100 {
             let (prev, word) = cg.generate(None, &mut rng);
@@ -1274,6 +1307,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
         );
         classes.insert(
@@ -1284,6 +1318,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
         );
         let templates = vec![vec!["det".to_string(), "noun".to_string()]];
@@ -1307,6 +1342,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
         );
         classes.insert(
@@ -1317,6 +1353,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             ),
         );
         let templates = vec![
@@ -1354,6 +1391,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             )
             .with_lexicon(3, &mut rng),
         );
@@ -1365,6 +1403,7 @@ mod gen_tests {
                 None,
                 None,
                 false,
+                sketch::ResolvedReduction::default(),
             )
             .with_lexicon(10, &mut rng),
         );
@@ -1464,11 +1503,31 @@ mod gen_tests {
     fn assign_stress_secondary_penultimate() {
         let mut word = make_syllables(5);
         assign_stress(&mut word, sketch::StressStrategy::Penultimate, true);
-        assert_eq!(word[0].stress(), phone::Stress::Secondary);
-        assert_eq!(word[1].stress(), phone::Stress::None);
-        assert_eq!(word[2].stress(), phone::Stress::Secondary);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::Secondary);
+        assert_eq!(word[2].stress(), phone::Stress::None);
         assert_eq!(word[3].stress(), phone::Stress::Primary);
-        assert_eq!(word[4].stress(), phone::Stress::Secondary);
+        assert_eq!(word[4].stress(), phone::Stress::None);
+    }
+
+    #[test]
+    fn assign_stress_secondary_iambic() {
+        let mut word = make_syllables(4);
+        assign_stress(&mut word, sketch::StressStrategy::Iambic, true);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::Primary);
+        assert_eq!(word[2].stress(), phone::Stress::None);
+        assert_eq!(word[3].stress(), phone::Stress::Secondary);
+    }
+
+    #[test]
+    fn assign_stress_secondary_final() {
+        let mut word = make_syllables(4);
+        assign_stress(&mut word, sketch::StressStrategy::Final, true);
+        assert_eq!(word[0].stress(), phone::Stress::None);
+        assert_eq!(word[1].stress(), phone::Stress::Secondary);
+        assert_eq!(word[2].stress(), phone::Stress::None);
+        assert_eq!(word[3].stress(), phone::Stress::Primary);
     }
 
     #[test]
@@ -1483,6 +1542,112 @@ mod gen_tests {
         let mut word = make_syllables(2);
         assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
         assert_eq!(format_word(&word), "ˈta.ta");
+    }
+
+    fn reduction(probability: f64) -> sketch::ResolvedReduction {
+        sketch::ResolvedReduction {
+            probability,
+            targets: sketch::ReductionTargets::All(phone::Vowel::Schwa),
+        }
+    }
+
+    #[test]
+    fn apply_reduction_unstressed_only() {
+        let mut rng = rand::rng();
+        let mut word = make_syllables(2);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
+        apply_reduction(&mut word, &reduction(1.0), &mut rng);
+        assert_eq!(format_word(&word), "ˈta.tə");
+    }
+
+    #[test]
+    fn apply_reduction_zero_probability_is_noop() {
+        let mut rng = rand::rng();
+        let mut word = make_syllables(2);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, false);
+        apply_reduction(&mut word, &reduction(0.0), &mut rng);
+        assert_eq!(format_word(&word), "ˈta.ta");
+    }
+
+    #[test]
+    fn apply_reduction_fully_unstressed_word() {
+        let mut rng = rand::rng();
+        let mut word = make_syllables(3);
+        assign_stress(&mut word, sketch::StressStrategy::None, false);
+        apply_reduction(&mut word, &reduction(1.0), &mut rng);
+        assert_eq!(format_word(&word), "tə.tə.tə");
+    }
+
+    #[test]
+    fn apply_reduction_protects_secondary_stress() {
+        let mut rng = rand::rng();
+        let mut word = make_syllables(4);
+        assign_stress(&mut word, sketch::StressStrategy::Trochaic, true);
+        apply_reduction(&mut word, &reduction(1.0), &mut rng);
+        assert_eq!(format_word(&word), "ˈta.tə.ˌta.tə");
+    }
+
+    #[test]
+    fn apply_reduction_collapses_diphthong() {
+        let mut rng = rand::rng();
+        let mut word: SmallVec<[phone::Syllable; 4]> = smallvec![phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::T),
+            phone::Segment::compound(
+                phone::Phoneme::Vowel(phone::Vowel::A),
+                phone::Phoneme::Vowel(phone::Vowel::I),
+            ),
+        ])];
+        apply_reduction(&mut word, &reduction(1.0), &mut rng);
+        assert_eq!(
+            word[0].segments()[1],
+            phone::Segment::from(phone::Vowel::Schwa)
+        );
+    }
+
+    #[test]
+    fn apply_reduction_targets_only_mapped_vowels() {
+        let mut rng = rand::rng();
+        // /ta.ti/, fully unstressed: with targets {a → ɐ}, /a/ reduces and /i/ is untouched.
+        let mut word: SmallVec<[phone::Syllable; 4]> = smallvec![
+            phone::Syllable::new(&[
+                phone::Segment::from(phone::Consonant::T),
+                phone::Segment::from(phone::Vowel::A),
+            ]),
+            phone::Syllable::new(&[
+                phone::Segment::from(phone::Consonant::T),
+                phone::Segment::from(phone::Vowel::I),
+            ]),
+        ];
+        let red = sketch::ResolvedReduction {
+            probability: 1.0,
+            targets: sketch::ReductionTargets::Map(HashMap::from([(
+                phone::Vowel::A,
+                phone::Vowel::AFlip,
+            )])),
+        };
+        apply_reduction(&mut word, &red, &mut rng);
+        assert_eq!(format_word(&word), "tɐ.ti");
+    }
+
+    #[test]
+    fn apply_reduction_targets_key_diphthong_by_first_component() {
+        let mut rng = rand::rng();
+        let mut word: SmallVec<[phone::Syllable; 4]> = smallvec![phone::Syllable::new(&[
+            phone::Segment::from(phone::Consonant::T),
+            phone::Segment::compound(
+                phone::Phoneme::Vowel(phone::Vowel::A),
+                phone::Phoneme::Vowel(phone::Vowel::I),
+            ),
+        ])];
+        let red = sketch::ResolvedReduction {
+            probability: 1.0,
+            targets: sketch::ReductionTargets::Map(HashMap::from([(
+                phone::Vowel::A,
+                phone::Vowel::U,
+            )])),
+        };
+        apply_reduction(&mut word, &red, &mut rng);
+        assert_eq!(word[0].segments()[1], phone::Segment::from(phone::Vowel::U));
     }
 
     fn make_morphology(
@@ -1573,6 +1738,7 @@ mod gen_tests {
             Some(morph),
             Some(sketch::StressStrategy::Final),
             false,
+            sketch::ResolvedReduction::default(),
         );
         let mut rng = rand::rng();
         for _ in 0..50 {

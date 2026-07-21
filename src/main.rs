@@ -141,6 +141,7 @@ impl PhonemeArgs {
                     lexicon: None,
                     stress: None,
                     secondary_stress: false,
+                    reduction: sketch::ResolvedReduction::default(),
                 },
             );
             Ok(ResolvedArgs {
@@ -664,6 +665,7 @@ async fn main() -> anyhow::Result<()> {
                         morph,
                         wc.stress,
                         wc.secondary_stress,
+                        wc.reduction,
                     );
                     if let Some(lex) = wc.lexicon {
                         cg = cg.with_lexicon(lex.size, &mut rng);
@@ -739,6 +741,7 @@ async fn main() -> anyhow::Result<()> {
                         morph,
                         wc.stress,
                         wc.secondary_stress,
+                        wc.reduction,
                     );
                     if let Some(lex) = wc.lexicon {
                         cg = cg.with_lexicon(lex.size, rng);

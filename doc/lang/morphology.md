@@ -59,7 +59,7 @@ Add a `morphology` section to your config JSON:
 
 ### Application Order
 
-Morphology runs **after** word generation but **before** stress assignment.
+Morphology runs **after** word generation but **before** [stress assignment](stress.md).
 This means stress is computed over the full derived form including affixes, matching how natural languages work (e.g., English "PHOto" vs "phoTOgraphy").
 
 ### Decay

@@ -61,6 +61,56 @@ pub struct StressConfig {
     pub secondary: bool,
 }
 
+/// Configuration for unstressed-vowel reduction.
+#[derive(Debug, Deserialize)]
+pub struct ReductionConfig {
+    /// Probability (0.0–1.0) an unstressed syllable's vowel reduces.
+    pub probability: f64,
+    /// Single vowel every reduced vowel collapses to. Mutually exclusive with
+    /// `targets`; exactly one of the two is required.
+    pub target: Option<String>,
+    /// Map from source vowels (each key a string of IPA vowels) to the single
+    /// vowel they reduce to. Mutually exclusive with `target`.
+    pub targets: Option<HashMap<String, String>>,
+}
+
+/// What reduced vowels turn into.
+#[derive(Debug, Clone)]
+pub enum ReductionTargets {
+    /// Every vowel reduces to this single target.
+    All(phone::Vowel),
+    /// Only mapped vowels reduce, each to its mapped target.
+    Map(HashMap<phone::Vowel, phone::Vowel>),
+}
+
+impl ReductionTargets {
+    /// The vowel `v` reduces to, or `None` if `v` does not reduce.
+    pub fn target_for(&self, v: phone::Vowel) -> Option<phone::Vowel> {
+        match self {
+            Self::All(t) => Some(*t),
+            Self::Map(map) => map.get(&v).copied(),
+        }
+    }
+}
+
+/// Resolved vowel-reduction settings.
+#[derive(Debug, Clone)]
+pub struct ResolvedReduction {
+    /// Probability (0.0–1.0) an unstressed syllable's vowel reduces.
+    pub probability: f64,
+    pub targets: ReductionTargets,
+}
+
+impl Default for ResolvedReduction {
+    /// Reduction disabled: zero probability (the target is never consulted).
+    fn default() -> Self {
+        Self {
+            probability: 0.0,
+            targets: ReductionTargets::All(phone::Vowel::Schwa),
+        }
+    }
+}
+
 /// Configuration for morphological affixation.
 #[derive(Debug, Deserialize)]
 pub struct MorphologyConfig {
@@ -113,6 +163,7 @@ pub struct Sketch {
     pub sentence: Option<SentenceConfig>,
     pub grammar: Option<Vec<NamedSetEntry>>,
     pub stress: Option<StressConfig>,
+    pub reduction: Option<ReductionConfig>,
     pub morphology: Option<MorphologyConfig>,
 }
 
@@ -150,6 +201,7 @@ pub struct ResolvedWordClass {
     pub lexicon: Option<LexiconGenerateConfig>,
     pub stress: Option<StressStrategy>,
     pub secondary_stress: bool,
+    pub reduction: ResolvedReduction,
 }
 
 /// A resolved affix ready for generation.
@@ -237,6 +289,75 @@ impl Sketch {
         let default_strategy = self.stress.as_ref().map(|s| s.default);
         let default_secondary = self.stress.as_ref().is_some_and(|s| s.secondary);
 
+        // Resolve vowel reduction (absent = feature off).
+        let reduction = match self.reduction {
+            None => ResolvedReduction::default(),
+            Some(rc) => {
+                // Reduction targets unstressed syllables, so without any stress
+                // configuration every syllable would reduce — reject the likely
+                // mistake. An explicit "none" (top-level or per-class) is allowed.
+                if self.stress.is_none() && self.word_classes.values().all(|wc| wc.stress.is_none())
+                {
+                    return Err(SketchError::Validation(
+                        "reduction requires stress assignment; add a top-level stress section \
+                         or per-class stress fields"
+                            .into(),
+                    ));
+                }
+                if !(0.0..=1.0).contains(&rc.probability) {
+                    return Err(SketchError::Validation(
+                        "reduction.probability must be between 0.0 and 1.0".into(),
+                    ));
+                }
+                let parse_target = |target: &str| -> Result<phone::Vowel, SketchError> {
+                    let mut chars = target.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Ok(phone::Vowel::try_from(c)?),
+                        _ => Err(SketchError::Validation(format!(
+                            "reduction target must be a single vowel, got {target:?}"
+                        ))),
+                    }
+                };
+                let targets = match (rc.target, rc.targets) {
+                    (Some(_), Some(_)) => {
+                        return Err(SketchError::Validation(
+                            "reduction.target and reduction.targets are mutually exclusive".into(),
+                        ));
+                    }
+                    (None, None) => {
+                        return Err(SketchError::Validation(
+                            "reduction requires either a target or a targets map".into(),
+                        ));
+                    }
+                    (Some(t), None) => ReductionTargets::All(parse_target(&t)?),
+                    (None, Some(raw)) => {
+                        let mut map = HashMap::new();
+                        for (sources, target) in raw {
+                            let t = parse_target(&target)?;
+                            if sources.is_empty() {
+                                return Err(SketchError::Validation(
+                                    "reduction.targets keys must not be empty".into(),
+                                ));
+                            }
+                            for ch in sources.chars() {
+                                let v = phone::Vowel::try_from(ch)?;
+                                if map.insert(v, t).is_some() {
+                                    return Err(SketchError::Validation(format!(
+                                        "vowel {ch:?} appears in multiple reduction targets"
+                                    )));
+                                }
+                            }
+                        }
+                        ReductionTargets::Map(map)
+                    }
+                };
+                ResolvedReduction {
+                    probability: rc.probability,
+                    targets,
+                }
+            }
+        };
+
         // Resolve word classes.
         let mut resolved_classes = HashMap::new();
         for (name, config) in self.word_classes {
@@ -256,6 +377,7 @@ impl Sketch {
                     lexicon,
                     stress,
                     secondary_stress: default_secondary,
+                    reduction: reduction.clone(),
                 },
             );
         }
@@ -983,6 +1105,156 @@ mod tests {
             "vowels": "aiu",
             "word_classes": { "word": { "patterns": ["CVC"] } },
             "morphology": { "decay": 2.0 }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_invalid_probability_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 1.5, "target": "ə" }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_resolves_onto_word_classes() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.7, "target": "ə" }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let reduction = &resolved.word_classes["word"].reduction;
+        assert_eq!(reduction.probability, 0.7);
+        assert!(matches!(
+            reduction.targets,
+            ReductionTargets::All(phone::Vowel::Schwa)
+        ));
+    }
+
+    #[test]
+    fn reduction_without_stress_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "reduction": { "probability": 0.7, "target": "ə" }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_with_only_per_class_stress_ok() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": {
+                "word": { "patterns": ["CVC"], "stress": "trochaic" },
+                "det":  { "patterns": ["CV"] }
+            },
+            "reduction": { "probability": 0.7, "target": "ə" }
+        }"#;
+        assert!(Sketch::load(json).is_ok());
+    }
+
+    #[test]
+    fn reduction_without_target_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.7 }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_target_and_targets_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.7, "target": "ə", "targets": { "a": "ə" } }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_absent_defaults_to_zero() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        assert_eq!(resolved.word_classes["word"].reduction.probability, 0.0);
+    }
+
+    #[test]
+    fn reduction_targets_resolve() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aeɛou",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": {
+                "probability": 0.8,
+                "targets": { "aeɛ": "ə", "o": "u" }
+            }
+        }"#;
+        let resolved = Sketch::load(json).unwrap();
+        let ReductionTargets::Map(ref targets) = resolved.word_classes["word"].reduction.targets
+        else {
+            panic!("expected a targets map");
+        };
+        assert_eq!(targets.len(), 4);
+        assert_eq!(targets[&phone::Vowel::A], phone::Vowel::Schwa);
+        assert_eq!(targets[&phone::Vowel::EOpen], phone::Vowel::Schwa);
+        assert_eq!(targets[&phone::Vowel::O], phone::Vowel::U);
+        assert!(!targets.contains_key(&phone::Vowel::U));
+    }
+
+    #[test]
+    fn reduction_target_not_single_vowel_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.5, "targets": { "a": "əu" } }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_target_consonant_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.5, "targets": { "t": "ə" } }
+        }"#;
+        assert!(Sketch::load(json).is_err());
+    }
+
+    #[test]
+    fn reduction_duplicate_source_vowel_error() {
+        let json = r#"{
+            "consonants": "ptk",
+            "vowels": "aiu",
+            "word_classes": { "word": { "patterns": ["CVC"] } },
+            "stress": { "default": "trochaic" },
+            "reduction": { "probability": 0.5, "targets": { "ai": "ə", "au": "u" } }
         }"#;
         assert!(Sketch::load(json).is_err());
     }

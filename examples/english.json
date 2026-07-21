@@ -8,6 +8,7 @@
     "distribution": { "curve": "cosine" }
   },
   "stress": { "default": "trochaic", "secondary": true },
+  "reduction": { "probability": 0.7, "target": "ə" },
   "sets": {
     "O": ["n", "t", "s", "ɹ", "d", "l", "k", "m", "p", "f", "b", "h", "ʃ", "g", "j", "θ", "st", "sp", "sk", "tɹ", "pɹ", "pl", "bl", "kl"],
     "K": ["n", "t", "s", "ɹ", "d", "l", "ð", "k", "z", "m", "p", "v", "f", "ŋ", "ʃ", "θ", "nd", "nt", "ns", "ks", "lz", "lk"]

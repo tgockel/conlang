@@ -1535,6 +1535,20 @@ impl Syllable {
         &self.tone
     }
 
+    /// Reduce vocalic segments in this syllable, leaving consonants (onset/coda)
+    /// untouched. `target` maps each vowel to what it reduces to, or `None` to
+    /// leave it alone. Diacritics on a reduced vowel are dropped; a diphthong is
+    /// keyed by its first component and collapses to a single vowel.
+    pub fn reduce_vowels(&mut self, target: impl Fn(Vowel) -> Option<Vowel>) {
+        for seg in self.inner.iter_mut() {
+            if let Phoneme::Vowel(v) = seg.base()
+                && let Some(t) = target(v)
+            {
+                *seg = Segment::from(t);
+            }
+        }
+    }
+
     /// Parse an IPA string into a syllable, handling stress marks, segments with
     /// diacritics/tie bars, and trailing tone letters.
     pub fn parse_ipa(input: &str) -> Result<Self, ParseError> {
